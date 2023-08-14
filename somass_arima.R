@@ -28,7 +28,7 @@ mytheme <- theme_bw() +
 
 # Explore time series data -----------------------------------------------------
 
-somass <- read.csv("Spot and Mean Daily Water Temp Data At Depth 21.09.21.csv") %>% 
+spot <- read.csv("Spot and Mean Daily Water Temp Data At Depth 21.09.21.csv") %>% 
   filter(Location == "Somass River [PaperMill 1990s-2000s]") %>% 
   dplyr::select(c(5,7, 11)) %>%                       # Remove unnecessary columns.
   mutate(date = dmy(Date),                            # Reformat date column.
@@ -36,11 +36,13 @@ somass <- read.csv("Spot and Mean Daily Water Temp Data At Depth 21.09.21.csv") 
          week = week(ymd(date))) %>%                  # Week - because data are weekly (roughly).
   dplyr::select(-Date)                                # Remove original dates.
 
+max(spot$date)
+
 win <- seq(as.Date("2012-01-01"),                     # Isolate study window in variable.
-           as.Date("2021-09-03"),                     # Almost 9 full years
+           max(spot$date),                     # Almost 9 full years
            by = "days")                               # of daily info.
 
-somass <- somass[somass$date %in% win,]               # Subset to above window.
+somass <- spot[spot$date %in% win,]               # Subset to above window.
 
 alldates <- as.data.frame(win) %>%       
   `colnames<-`(., c("date")) %>%                      # Rename column,
@@ -165,12 +167,12 @@ ggsave("plots/temp_dists.png", units = "px",
 # -------------------------------------------------------------------------
 
 # Set up forecast horizon, here h = 26 weeks (~ 6 months).
-fh <- 26
+fh <- 36
 
 # Set up list to store output values.
 bestfit <- list(aicc = Inf) 
 
-for(i in 1:50) {                        # For fourier terms 1 - 50.
+for(i in 1:25) {                        # For fourier terms 1 - 50.
   fit <- auto.arima(STS,                # Conduct automatic ARIMA models.
                     xreg = fourier(STS, K = i), # Use Fourier on timeseries data with varying number of terms.
                     seasonal = FALSE)   # Fourier to encompass seasonality so exclude from base model.
@@ -180,8 +182,8 @@ for(i in 1:50) {                        # For fourier terms 1 - 50.
   else break;                        # Otherwise, exist loop (saves a lot of memory).
 }
 
-(bf <- length(bestfit))              # Optimal number of Fourier terms.
-bestfit$arma; bestfit                # Optimal model and error distribution (3,1,3).
+(bf <- ncol(bestfit$xreg)/2)         # Optimal number of Fourier terms.
+bestfit$arma; bestfit                # Optimal model and error distribution.
 summary(bestfit)                     # Prints favourable summary stats.
 
 harmonics <- fourier(STS,            # Fit optimal Fourier model to observed data.
@@ -246,16 +248,20 @@ h2.newvars <- as.data.frame(newharmonics) %>%
 # Forecast air temp + seasonality model using forecasted data.
 h2f <- forecast(h2, xreg = as.matrix(h2.newvars)); head(h2f)
 plot(h2f) # Trajectory and prediction intervals seem reasonable.
-plot(h2f, xlim = c(480, 540))
+plot(h2f, xlim = c(500, 550))
 
 # Coerce above data into a dataframe for ggplot.
 df2 <- data.frame(meanT = as.numeric(h2f$mean),
-                  lwr = as.numeric(h2f$lower[,1]),
-                  upr = as.numeric(h2f$upper[,1]),
-                  date = rep(max(impDF$date), 26) + seq(0, 7*25, 7),
+                  lwr80 = as.numeric(h2f$lower[,1]),
+                  lwr95 = as.numeric(h2f$lower[,2]),
+                  upr80 = as.numeric(h2f$upper[,1]),
+                  upr95 = as.numeric(h2f$upper[,2]),
+                  date = rep(max(impDF$date), fh) + seq(0, 7*(fh-1), 7),
                   type = "Forecasted") %>% 
   rbind(., impDF[,c(1:2)] %>% 
-          mutate(upr = NA, lwr = NA, type = "Observed") %>% 
+          mutate(upr80 = NA, lwr80 = NA, 
+                 upr95 = NA, lwr95 = NA,
+                 type = "Observed") %>% 
           rename("meanT" = "wSom")) 
 
 # Plot full time series. 
@@ -266,25 +272,29 @@ df2 <- data.frame(meanT = as.numeric(h2f$mean),
                colour = "red2",
                linetype = "dashed",
                alpha = c(1/8, 2/5, 1)) +
-    geom_ribbon(aes(ymin = lwr, ymax = upr,
+    geom_ribbon(aes(ymin = lwr95, ymax = upr95,
                     fill = type),
-                alpha = 2/10) +
+                alpha = 1/5) +
+    geom_ribbon(aes(ymin = lwr80, ymax = upr80,
+                    fill = type),
+                alpha = 2/5) + 
     geom_line(linewidth = 1, aes(colour = type)) + 
     mytheme +
     labs(x = "", y = "Somass River Temperature (°C)") +
-    theme(plot.margin = margin(5, 10, 0.1, 5, "pt")))
+    theme(plot.margin = margin(5, 10, 0.1, 5, "pt")) +
+    guides(colour = "none"))
 
 # Plot zoomed-in time series.
 zi2 <- full2 +
     geom_point(aes(colour = type), size = 2.5,
                alpha = 1/2) +
-    scale_x_date(limits = c(as.Date("2021-06-01"), 
-                            as.Date("2021-11-31")),
+    scale_x_date(limits = c(as.Date("2021-6-01"), 
+                            as.Date("2021-12-01")),
                  date_breaks = "1 month",
                  date_labels = "%b") +
     theme(legend.position = "none") +
-    scale_y_continuous(breaks = seq(2, 25, 2),
-                       limits = c(6.5, 23))
+    scale_y_continuous(breaks = seq(2, 25, 4),
+                       limits = c(4, 23))
 gginnards::move_layers(zi2, "GeomPoint", position = "top")
 
 # Combine full and zoomed in time series plots.
@@ -294,3 +304,26 @@ gginnards::move_layers(zi2, "GeomPoint", position = "top")
 
 ggsave("plots/ARIMA_wTemp.png", units = "px",
        width = 2500, height = 1500)
+
+accuracy(h2f)
+
+dim(dat)
+length(h2$fitted)
+
+dat2 <- dat %>% 
+  mutate(fitted = h2$fitted) %>% 
+  dplyr::select("wSom", "fitted", "date") %>% 
+  rename("Observed" = "wSom",
+         "Fitted" = "fitted") %>% 
+  pivot_longer(cols = c("Fitted", "Observed"))
+
+ggplot(dat2, 
+       aes(x = date,
+           y = value,
+           colour = name)) +
+  geom_line(size = 1, alpha = 3/4) + mytheme +
+  labs(y = "Somass temperature (°C)", x = "") +
+  scale_y_continuous(breaks = seq(3, 23, 4))
+
+
+
