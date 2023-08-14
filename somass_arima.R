@@ -42,9 +42,7 @@ win <- seq(as.Date("2012-01-01"),                     # Isolate study window in 
 
 somass <- somass[somass$date %in% win,]               # Subset to above window.
 
-alldates <- as.data.frame(seq(min(win),      # Dataframe of all dates 
-                              max(win),      # in study window.
-                              by = "days")) %>%       
+alldates <- as.data.frame(win) %>%       
   `colnames<-`(., c("date")) %>%                      # Rename column,
   mutate(week = week(ymd(date)),                      # Reformat dates.
          Year = year(date)) %>% 
@@ -85,9 +83,9 @@ impDF <- data.frame(wSom = as.numeric(weekimp),
   ))
 
 STS <- ts(as.numeric(impDF$wSom), # Set Somass temperatures as a time series object.
-          frequency = 52)       # Weekly averages with annual seasonality.
-ns <- decompose(STS); plot(ns)  # View decomposition of time series data.
-plot(ns$seasonal)               # Clearly strong seasonal component.
+          frequency = 52)         # Weekly averages with annual seasonality.
+ns <- decompose(STS); plot(ns)    # View decomposition of time series data.
+plot(ns$seasonal)                 # Clearly strong seasonal component.
 
 
 # Air temperature data ---------------------------------------------------------
