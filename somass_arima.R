@@ -123,7 +123,6 @@ air.impall <- data.frame(tImp = as.numeric(airimp),       # Store imputed data i
                          year = fullair$year) %>%         # Add year.
   mutate(rAir = rollapply(tImp, 7, mean, partial = TRUE)) # Rolling average of air temp.
 
-
 # Combine all spot check data and air temp data.
 dat <- merge(impDF, air.impall, by = c("date", "year")) %>% 
   select(c(1:3, "rAir"))
@@ -164,9 +163,10 @@ tempR + geom_smooth(colour = "black") +
 ggsave("plots/temp_dists.png", units = "px",
        width = 2000, height = 1500)
 
-# -------------------------------------------------------------------------
 
-# Set up forecast horizon, here h = 26 weeks (~ 6 months).
+# Seasonality ------------------------------------------------------------------
+
+# Set up forecast horizon, here h = 36 weeks.
 fh <- 36
 
 # Set up list to store output values.
@@ -220,7 +220,50 @@ h2 <- Arima(y = as.numeric(STS),
             order = c(1,0,1),
             seasonal = FALSE,
             xreg = as.matrix(cbind(harmonics, 
-                                  airvars[,c(2:4)])))
+                             airvars[,c(2:4)])))
+
+# See how harmonics coincide with air temperature data.
+exvar = as.data.frame(cbind(harmonics, airvars)) %>% 
+  mutate(year = year(date),
+         f2 = `S1-52` + `C1-52` + `C2-52` + `S2-52`,
+         fp2 = scale(1-f2),
+         airsc = scale(air1)) %>% 
+  rename("Fourier" = "fp2",
+         "Air temperature" = "airsc") %>% 
+  pivot_longer(cols = c("Fourier", "Air temperature")) 
+
+(total <- ggplot() + 
+  geom_line(data = exvar,
+            aes(x = date, 
+                y = value, 
+                colour = name),
+            size = 1, alpha = 4/5) + 
+  mytheme + 
+    theme(legend.position = "top",
+          plot.margin = margin(0,0.2,-0.2,0.2,"cm")) +
+  ylab("Scaled values") + xlab(""))
+
+(yr.fac <- ggplot() + 
+    geom_line(data = exvar[exvar$year != 2021,],
+              aes(x = date, 
+                  y = value, 
+                  colour = name),
+              size = 1, alpha = 4/5) + 
+    mytheme + theme(legend.position = "none") +
+    ylab("Scaled values") + xlab("") + 
+    facet_wrap(~year, scales = "free", ncol = 3) +
+    scale_x_date(date_breaks = "2 month",
+                 date_labels = "%b"))
+
+cowplot::plot_grid(total, yr.fac, ncol = 1,
+                   rel_heights = c(0.4, 1),
+                   align = "V")
+
+ggsave("plots/fourierK2.png", units = "px",
+       width = 2500, height = 3000)
+
+summary(htemp)
+checkresiduals(htemp)
 
 # Inspect residuals and summary.
 h2 %>% checkresiduals()
@@ -241,9 +284,14 @@ prjAir <- as.data.frame(forecast(airTS, h = fh)) %>%
   mutate(air2 = air1^2, air3 = air1^3) %>% 
   dplyr::select(starts_with("air"))
 
+# prjAir[1:12,1] <- 30
+# prjAir[1:12,2] <- 30^2
+# prjAir[1:12,3] <- 30^3
+
 # Bind projected air temperatures to Fourier terms.
 h2.newvars <- as.data.frame(newharmonics) %>% 
   cbind(., prjAir)
+
 
 # Forecast air temp + seasonality model using forecasted data.
 h2f <- forecast(h2, xreg = as.matrix(h2.newvars)); head(h2f)
@@ -315,7 +363,8 @@ dat2 <- dat %>%
   dplyr::select("wSom", "fitted", "date") %>% 
   rename("Observed" = "wSom",
          "Fitted" = "fitted") %>% 
-  pivot_longer(cols = c("Fitted", "Observed"))
+  pivot_longer(cols = c("Fitted", "Observed")) %>% 
+  mutate(year = year(date))
 
 ggplot(dat2, 
        aes(x = date,
@@ -323,7 +372,9 @@ ggplot(dat2,
            colour = name)) +
   geom_line(size = 1, alpha = 3/4) + mytheme +
   labs(y = "Somass temperature (°C)", x = "") +
-  scale_y_continuous(breaks = seq(3, 23, 4))
+  scale_y_continuous(breaks = seq(3, 23, 4)) +
+  facet_wrap(~year, scales = "free", nrow = 2) +
+  scale_x_date(date_labels = "%b")
 
-
-
+ggsave("plots/fit_obs.png", units = "px",
+       width = 3000, height = 1700)
