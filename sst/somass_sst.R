@@ -20,6 +20,7 @@ mytheme <- theme_bw() +
 
 # Read in entirety of spot check data.
 annual <- spot %>% 
+  filter(doy > 121 & doy < 274) %>% 
   group_by(Year) %>% 
   summarise(t18 = length(MeanWaterT > 18),
             t19 = length(MeanWaterT > 19),
@@ -81,9 +82,10 @@ ggplot(data = temps[temps$SomVar == "mean",] %>%
   facet_wrap(~ONIvar, scales = "free", 
              labeller = plotlabs) +
   mytheme + 
-  scale_y_continuous(limits = c(11.2, 16.3)) +
   labs(x = "", y = "Average Somass River temperature (°C)") +
-  stat_poly_eq(use_label(c("R2", "p")))
+  stat_poly_eq(use_label(c("R2", "p")),
+               label.x = "right",
+               label.y = "bottom")
 
 ggsave("plots/meanSomass_sst.png", units = "px",
        width = 3000, height = 2000)

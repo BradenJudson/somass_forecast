@@ -38,11 +38,11 @@ spot <- read.csv("Spot and Mean Daily Water Temp Data At Depth 21.09.21.csv") %>
 
 max(spot$date)
 
-win <- seq(as.Date("2012-01-01"),                     # Isolate study window in variable.
-           max(spot$date),                     # Almost 9 full years
-           by = "days")                               # of daily info.
+win <- seq(as.Date("2012-01-01"),         # Isolate study window in variable.
+           max(spot$date),                # Almost 9 full years
+           by = "days")                   # of daily info.
 
-somass <- spot[spot$date %in% win,]               # Subset to above window.
+somass <- spot[spot$date %in% win,]       # Subset to above window.
 
 alldates <- as.data.frame(win) %>%       
   `colnames<-`(., c("date")) %>%                      # Rename column,
@@ -220,17 +220,21 @@ h2 <- Arima(y = as.numeric(STS),
             order = c(1,0,1),
             seasonal = FALSE,
             xreg = as.matrix(cbind(harmonics, 
-                             airvars[,c(2:4)])))
+                   airvars[,c(2:4)])))
+
+AIC(h2)
 
 # See how harmonics coincide with air temperature data.
 exvar = as.data.frame(cbind(harmonics, airvars)) %>% 
+  merge(., impDF, by = "date") %>% 
   mutate(year = year(date),
          f2 = `S1-52` + `C1-52` + `C2-52` + `S2-52`,
          fp2 = scale(1-f2),
-         airsc = scale(air1)) %>% 
+         airsc = scale(air1),
+         Somass = scale(wSom)) %>% 
   rename("Fourier" = "fp2",
          "Air temperature" = "airsc") %>% 
-  pivot_longer(cols = c("Fourier", "Air temperature")) 
+  pivot_longer(cols = c("Fourier", "Air temperature", "Somass")) 
 
 (total <- ggplot() + 
   geom_line(data = exvar,
@@ -279,14 +283,25 @@ airTS <- ts(airvars[airvars$date > "2020-01-01", "air1"],
 forecast(airTS, h = fh) %>% plot()
 
 # Assign projected air temperature data to a DF.
+# Below, I increase the projected air temperature variables by 1/4 such that they 
+# match the observed temperature. This is just for exploration purposes. Also the 
+# forecast of air temperature is highly imprecise and the trend appears to decline 
+# more steeply than what would be expected in recent years.
+# Use independent meteorological 14-day forecasts in future. 
+
 prjAir <- as.data.frame(forecast(airTS, h = fh)) %>% 
   rename("air1" = "Point Forecast") %>% 
-  mutate(air2 = air1^2, air3 = air1^3) %>% 
+  mutate(air1 = air1 + 0.25*air1,
+         air2 = air1^2 + 0.25*air1^2, 
+         air3 = air1^3 + 0.25*air1^3) %>% 
   dplyr::select(starts_with("air"))
 
-# prjAir[1:12,1] <- 30
-# prjAir[1:12,2] <- 30^2
-# prjAir[1:12,3] <- 30^3
+
+# For experimentation only.
+# prjAir[1:16,1] <- 30
+# prjAir[1:16,2] <- 30^2
+# prjAir[1:16,3] <- 30^3
+
 
 # Bind projected air temperatures to Fourier terms.
 h2.newvars <- as.data.frame(newharmonics) %>% 
