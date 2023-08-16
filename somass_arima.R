@@ -138,19 +138,43 @@ ggplot(data = dat %>%
 ggsave("plots/temps_TS.png", units = "px",
        width = 2000, height = 1200)
 
+# Linear fit between Somass temp and air temp.
+(fit <- lm(data = dat, wSom ~ rAir)); summary(fit)
+
+# Looks like air temperature might be lagged behind water temperature a bit.
+# To test this, I'll see if lagging the temperature improves anything.
+
+# Make a list for the for-loop ouputs.
+aics <- list()
+
+# Testing 1-10 week lag effects.
+for (i in 1:10) {
+  dat2 <- dat %>% 
+    mutate(rAirL = dplyr::lag(rAir, i))
+  
+  fitL <- lm(data = dat2, wSom ~ rAirL)
+  aics[i] <- AIC(fitL)
+}
+
+# Store loop outputs here.
+# Have to add lag = 0 using rbind.
+j<- as.data.frame(do.call(rbind, aics)) %>% 
+  `colnames<-`(., c("AIC")) %>% 
+  rownames_to_column(var = "lag") %>% 
+  rbind(., data.frame(lag = 0,
+                      AIC = AIC(fit)))
+plot(j) # lag = 1 best fit (delta AIC = 21.8).
+
+# Add lagged air temperature data.
+dat$rAirL1 <- dplyr::lag(dat$rAir, 1)
+
 # Air temperature relationship by year.
 (tempR <- ggplot(data = dat %>% 
                    mutate(year = as.factor(year)), 
-                 aes(x = rAir, 
+                 aes(x = rAirL1, 
                      y = wSom,
                      colour = year)) +
     geom_point() + mytheme)
-
-# Assessing various model fits.
-(fit <- lm(data = dat, wSom ~ rAir)); summary(fit)
-(fit2 <- lm(data = dat, wSom ~ poly(rAir, 2, raw = TRUE))); summary(fit2)
-(fit3 <- lm(data = dat, wSom ~ poly(rAir, 3, raw = TRUE))); summary(fit3)
-anova(fit, fit2, fit3) # Cubic appears to be best, but not by a huge amount.
 
 # Cubic looks appropriate for most years.
 # Some better than others (great = 2015, less great = 2019).
@@ -163,8 +187,39 @@ tempR + geom_smooth(colour = "black") +
 ggsave("plots/temp_dists.png", units = "px",
        width = 2000, height = 1500)
 
+# Assessing various model fits.
+summary(fit) # Non-lagged model identified above.
+(fit2 <- lm(data = dat, wSom ~ poly(rAir, 2, raw = TRUE))); summary(fit2)
+(fit3 <- lm(data = dat, wSom ~ poly(rAir, 3, raw = TRUE))); summary(fit3)
+
+(fitL <- lm(data = dat, wSom ~ rAirL1)); summary(fitL)
+(fitL2 <- lm(data = dat, wSom ~ poly(rAirL1, 2, raw = TRUE))); summary(fitL2)
+(fitL3 <- lm(data = dat, wSom ~ poly(rAirL1, 3, raw = TRUE))); summary(fitL3)
+
+# Cubic model is the best fit for both lagged and un-lagged air temperature data.
+anova(fit, fit2, fit3)  
+anova(fitL, fitL2, fitL3)
+AIC(fit3); AIC(fitL3); round(abs(diff(c(AIC(fit3), AIC(fitL3)))), 2)
+# AIC suggests lagged (1-week) model is best fit.
+
+ggplot(data = dat[dat$year != "2021", ] %>% 
+         mutate("Air temperature (C)"   = scale(rAir),
+                "Lagged air temperature (C)" = scale(rAirL1),
+                "Somass temperature (C)"   = scale(wSom)) %>% 
+         pivot_longer(cols = c(6:8)),
+       aes(x = date, y = value, colour = name)) +
+  geom_line(alpha = 3/4, size = 3/4) +
+  mytheme + labs(x = "", y = "Scaled variable") +
+  facet_wrap(~year, scales = "free") +
+  scale_x_date(date_breaks = "2 month",
+               date_labels = "%b")
+
+ggsave("plots/temp_lag_relationships.png", units = "px",
+       width = 2250, height = 2000)
+
 
 # Seasonality ------------------------------------------------------------------
+
 
 # Set up forecast horizon, here h = 36 weeks.
 fh <- 36
@@ -182,7 +237,7 @@ for(i in 1:25) {                        # For fourier terms 1 - 50.
   else break;                        # Otherwise, exist loop (saves a lot of memory).
 }
 
-(bf <- ncol(bestfit$xreg)/2)         # Optimal number of Fourier terms.
+(bf <- ncol(bestfit$xreg)/4)         # Optimal number of Fourier terms.
 bestfit$arma; bestfit                # Optimal model and error distribution.
 summary(bestfit)                     # Prints favourable summary stats.
 
@@ -209,11 +264,16 @@ plot(f2, xlim = c(490, 540))         # Plot - just forecasted region
 
 # Above fit seems OK but I think adding an air temperature term would help.
 
+
+
+
+
+
 # Isolate air variables.
-airvars <- dat[,c(1,4)] %>% 
-  mutate(air2 = rAir^2,
-         air3 = rAir^3) %>% 
-  rename("air1" = "rAir")
+airvars <- dat[,c("date", "rAirL1")] %>% 
+  mutate(airL2 = rAirL1^2,
+         airL3 = rAirL1^3) %>% 
+  rename("airL1" = "rAirL1") 
 
 # New ARIMA w/ air temp as a covariate.
 h2 <- Arima(y = as.numeric(STS),
@@ -222,19 +282,21 @@ h2 <- Arima(y = as.numeric(STS),
             xreg = as.matrix(cbind(harmonics, 
                    airvars[,c(2:4)])))
 
-AIC(h2)
+# Check diagnostics.
+h2 %>% checkresiduals()
+summary(h2)
+
 
 # See how harmonics coincide with air temperature data.
 exvar = as.data.frame(cbind(harmonics, airvars)) %>% 
   merge(., impDF, by = "date") %>% 
-  mutate(year = year(date),
-         f2 = `S1-52` + `C1-52` + `C2-52` + `S2-52`,
-         fp2 = scale(1-f2),
-         airsc = scale(air1),
-         Somass = scale(wSom)) %>% 
+  mutate(f2 = `S1-52` + `C1-52`,
+         fp2 = as.numeric(scale(1-f2)),
+         airsc = as.numeric(scale(airL1)),
+         Somass = as.numeric(scale(wSom))) %>% 
   rename("Fourier" = "fp2",
-         "Air temperature" = "airsc") %>% 
-  pivot_longer(cols = c("Fourier", "Air temperature", "Somass")) 
+         "Lagged (1-w) air temperature" = "airsc") %>% 
+  pivot_longer(cols = c("Fourier", "Lagged (1-w) air temperature", "Somass")) 
 
 (total <- ggplot() + 
   geom_line(data = exvar,
@@ -245,6 +307,8 @@ exvar = as.data.frame(cbind(harmonics, airvars)) %>%
   mytheme + 
     theme(legend.position = "top",
           plot.margin = margin(0,0.2,-0.2,0.2,"cm")) +
+  scale_x_date(date_breaks = "1 year",
+               date_labels = "%Y") +
   ylab("Scaled values") + xlab(""))
 
 (yr.fac <- ggplot() + 
@@ -266,17 +330,11 @@ cowplot::plot_grid(total, yr.fac, ncol = 1,
 ggsave("plots/fourierK2.png", units = "px",
        width = 2500, height = 3000)
 
-summary(htemp)
-checkresiduals(htemp)
-
-# Inspect residuals and summary.
-h2 %>% checkresiduals()
-summary(h2)
 
 # Project air temperature out one months using current year only.
 # NOTE THAT THIS IS LIKELY INACCURATE AS IT DOES NOT ACCOUNT FOR
 # ANTICIPATED WEATHER CHANGES (e.g., PRECIPITATION or COOLING).
-airTS <- ts(airvars[airvars$date > "2020-01-01", "air1"], 
+airTS <- ts(airvars[airvars$date > "2020-01-01", "airL1"], 
             frequency = 52)
 
 # Forecast air temperatures out one month.
@@ -290,10 +348,10 @@ forecast(airTS, h = fh) %>% plot()
 # Use independent meteorological 14-day forecasts in future. 
 
 prjAir <- as.data.frame(forecast(airTS, h = fh)) %>% 
-  rename("air1" = "Point Forecast") %>% 
-  mutate(air1 = air1 + 0.25*air1,
-         air2 = air1^2 + 0.25*air1^2, 
-         air3 = air1^3 + 0.25*air1^3) %>% 
+  rename("airL1" = "Point Forecast") %>% 
+  mutate(airL1 = airL1,
+         airL2 = airL1^2,
+         airL3 = airL1^3) %>% 
   dplyr::select(starts_with("air"))
 
 
@@ -312,6 +370,7 @@ h2.newvars <- as.data.frame(newharmonics) %>%
 h2f <- forecast(h2, xreg = as.matrix(h2.newvars)); head(h2f)
 plot(h2f) # Trajectory and prediction intervals seem reasonable.
 plot(h2f, xlim = c(500, 550))
+accuracy(h2f)
 
 # Coerce above data into a dataframe for ggplot.
 df2 <- data.frame(meanT = as.numeric(h2f$mean),
@@ -367,8 +426,6 @@ gginnards::move_layers(zi2, "GeomPoint", position = "top")
 
 ggsave("plots/ARIMA_wTemp.png", units = "px",
        width = 2500, height = 1500)
-
-accuracy(h2f)
 
 dim(dat)
 length(h2$fitted)
