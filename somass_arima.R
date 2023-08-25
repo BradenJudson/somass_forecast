@@ -173,20 +173,16 @@ for (i in 1:10) {
                       AIC  =  AIC(fit))) %>% 
   mutate(lag = as.numeric(lag)) %>% 
   arrange(lag))
-plot(j) # lag = 1 best fit.
+
+# Lag = 1w is best fit.
+plot(j)
 
 
 # Add lagged air temperature data.
-dat$rAirL1 <- dplyr::lag(dat$rAir, 1)
-
-
-# Air temperature relationship by year.
-(tempR <- ggplot(data = dat %>% 
-                   mutate(year = as.factor(year)), 
-                 aes(x = rAirL1, 
-                     y = wSom,
-                     colour = year)) +
-    geom_point() + mytheme)
+# And impute one missing point (keep Nobs consistent).
+dat <- dat %>% 
+  mutate(rAirL1 = dplyr::lag(rAir, 1)) %>% 
+  tidyr::fill(rAirL1, .direction = 'up')
 
 
 # Cubic looks appropriate for most years.
@@ -221,6 +217,9 @@ summary(fit) # Non-lagged model identified above.
   relocate(call, 1) %>% 
   mutate(deltaAIC = round(AIC - min(AIC), 1)))
 
+# Write to directory.
+write.csv(fits, "lm_fits.csv", row.names = F)
+
 
 # Cubic model is the best fit for both lagged and un-lagged air temperature data.
 anova(fit, fit2, fit3)  
@@ -250,8 +249,8 @@ ggsave("plots/temp_lag_relationships.png", units = "px",
 # Seasonality ------------------------------------------------------------------
 
 
-# Set up forecast horizon, here h = 36 weeks.
-fh <- 36
+# Set up forecast horizon, here h = 6 weeks.
+fh <- 6
 
 
 # Set up list to store output values.
@@ -297,7 +296,7 @@ newharmonics <- fourier(STS,         # Extend fourier term into the future.
 
 f2 <- forecast(h1,xreg=newharmonics) # Forecast using above fit.
 plot(f2)                             # Plot - entire TS.
-plot(f2, xlim = c(490, 540))         # Plot - just forecasted region
+plot(f2, xlim = c(230, 260))         # Plot - just forecasted region
 
 
 # Above fit seems OK but I think adding an air temperature term would help.
@@ -408,7 +407,7 @@ h2.newvars <- as.data.frame(newharmonics) %>%
 # Forecast air temp + seasonality model using forecasted data.
 h2f <- forecast(h2, xreg = as.matrix(h2.newvars)); head(h2f)
 plot(h2f) # Trajectory and prediction intervals seem reasonable.
-plot(h2f, xlim = c(500, 550))
+plot(h2f, xlim = c(230, 255))
 accuracy(h2f)
 
 # Coerce above data into a dataframe for ggplot.
@@ -450,7 +449,7 @@ zi2 <- full2 +
     geom_point(aes(colour = type), size = 2.5,
                alpha = 1/2) +
     scale_x_date(limits = c(as.Date("2021-6-01"), 
-                            as.Date("2021-12-01")),
+                            as.Date("2021-10-20")),
                  date_breaks = "1 month",
                  date_labels = "%b") +
     theme(legend.position = "none") +
@@ -487,17 +486,5 @@ ggplot(fmDF,
 
 ggsave("plots/fit_obs.png", units = "px",
        width = 3000, height = 1700)
-
-
-#### CHECK - Do I really want to be using lagged 1w air temps to the 
-# as 3rd order polynomial?
-# use glance to assessm multiple models and make table.
-
-
-# Model testing ----------------------------------------------------------------
-
-
-
-
 
 
