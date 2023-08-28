@@ -105,7 +105,7 @@ fullair <- as.data.frame(seq(min(airtemp$date),   # Make an object with all date
                              by = "days")) %>%    # air temperature data available.
   `colnames<-`(., c("date")) %>%                  # Rename column.
   merge(., airtemp, by = "date",                  # Merge with original air temp data.
-        all = TRUE) %>%                           # Include rows with missing temp data.
+        all   = TRUE) %>%                         # Include rows with missing temp data.
   mutate(year = year(date),                       # Add year as grouping factor.
          doy  = yday(date))                       # Add day of the year.
 
@@ -248,14 +248,11 @@ ggsave("plots/temp_lag_relationships.png", units = "px",
 
 # Seasonality ------------------------------------------------------------------
 
-
 # Set up forecast horizon, here h = 6 weeks.
 fh <- 6
 
-
 # Set up list to store output values.
 bestfit <- list(aicc = Inf) 
-
 
 for(i in 1:25) {                        # For fourier terms 1 - 50.
   fit <- auto.arima(STS,                # Conduct automatic ARIMA models.
@@ -416,16 +413,21 @@ df2 <- data.frame(meanT = as.numeric(h2f$mean),
                   lwr95 = as.numeric(h2f$lower[,2]),
                   upr80 = as.numeric(h2f$upper[,1]),
                   upr95 = as.numeric(h2f$upper[,2]),
-                  date = rep(max(impDF$date), fh) + seq(0, 7*(fh-1), 7),
-                  type = "Forecasted") %>% 
+                  date  = rep(max(impDF$date), fh) + seq(0, 7*(fh-1), 7),
+                  type  = "Forecasted") %>% 
   rbind(., impDF[,c(1:2)] %>% 
-          mutate(upr80 = NA, lwr80 = NA, 
-                 upr95 = NA, lwr95 = NA,
-                 type = "Observed") %>% 
-          rename("meanT" = "wSom")) 
+          mutate(upr80  = NA, lwr80 = NA, 
+                 upr95  = NA, lwr95 = NA,
+                 type   = "Observed") %>% 
+         rename("meanT" = "wSom"))  %>% 
+  rbind(., data.frame(meanT = fitted(h2f, h = 6),
+                      upr80 = NA, lwr80 = NA,
+                      upr95 = NA, lwr95 = NA,
+                      type = "Fitted",
+                      date = impDF$date))
 
 # Plot full time series. 
-(full2 <- ggplot(data = df2,
+(full2 <- ggplot(data  = df2,
                  aes(x = date,
                      y = meanT)) +
     geom_hline(yintercept = c(18,19,20),
@@ -434,15 +436,19 @@ df2 <- data.frame(meanT = as.numeric(h2f$mean),
                alpha = c(1/8, 2/5, 1)) +
     geom_ribbon(aes(ymin = lwr95, ymax = upr95,
                     fill = type),
-                alpha = 1/5) +
+                   alpha = 1/5) +
     geom_ribbon(aes(ymin = lwr80, ymax = upr80,
                     fill = type),
-                alpha = 2/5) + 
-    geom_line(linewidth = 1, aes(colour = type)) + 
+                   alpha = 2/5) + 
+    geom_line(linewidth  = 1, 
+              aes(colour = type),
+              alpha = 4/5) + 
     mytheme +
     labs(x = "", y = "Somass River Temperature (°C)") +
     theme(plot.margin = margin(5, 10, 0.1, 5, "pt")) +
-    guides(colour = "none"))
+    guides(colour = "none") +
+  scale_x_date(date_breaks = "1 year",
+               date_labels = "%Y"))
 
 # Plot zoomed-in time series.
 zi2 <- full2 +
@@ -454,7 +460,7 @@ zi2 <- full2 +
                  date_labels = "%b") +
     theme(legend.position = "none") +
     scale_y_continuous(breaks = seq(2, 25, 4),
-                       limits = c(4, 23))
+                       limits = c(9, 23))
 gginnards::move_layers(zi2, "GeomPoint", position = "top")
 
 # Combine full and zoomed in time series plots.
@@ -464,27 +470,4 @@ gginnards::move_layers(zi2, "GeomPoint", position = "top")
 
 ggsave("plots/ARIMA_wTemp.png", units = "px",
        width = 2500, height = 2000)
-
-
-fmDF <- data.frame(modelled = h2$fitted,
-                   observed = h2$x,
-                   air = h2$xreg[,3],
-                   date = dat$date,
-                   year = dat$year) %>% 
-  pivot_longer(cols = c(modelled, observed, air))
-
-
-ggplot(fmDF, 
-       aes(x = date,
-           y = value,
-           colour = name)) +
-  geom_line(size = 1, alpha = 3/4) + mytheme +
-  labs(y = "Somass temperature (°C)", x = NULL) +
-  scale_y_continuous(breaks = seq(3, 50, 4)) +
-  facet_wrap(~year, scales = "free", nrow = 2) +
-  scale_x_date(date_labels = "%b")
-
-ggsave("plots/fit_obs.png", units = "px",
-       width = 3000, height = 1700)
-
 
