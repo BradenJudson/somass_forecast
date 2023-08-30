@@ -26,10 +26,11 @@ snow <- read.csv("DataSetExport-SD.Field Visits@3B02A-20230825160412.csv",
   mutate(date = mdy(sub(" .*", "", date)),
          Year = year(date),
          month = month(date)) %>%
-  filter(month %in% c(12, 1:4)) %>% 
+  filter(month %in% c(1:4)) %>% 
   group_by(Year) %>% 
   summarise(mSnow = mean(snow_cm, na.rm = TRUE),
-            sSnow = sd(snow_cm, na.rm = TRUE))
+            sSnow = sd(snow_cm, na.rm = TRUE),
+            nSnow = n())
 
 # Visualize snow pack time series.
 # Note missing data in 2019-2022.
@@ -68,7 +69,7 @@ annual <- spot %>%
 
 # NOAA ocean index data.
 noaa <- read_table(file = "cpc.ncep.noaa.gov_data_indices_oni.ascii.txt") %>% 
-  filter(SEAS %in% c("DJF", "JFM", "FMA", "MAM")) %>% 
+  filter(SEAS %in% c("JFM", "FMA", "MAM")) %>% 
   group_by(YR) %>% 
   summarise(anomM = mean(ANOM), anomS = sd(ANOM),
             tempM = mean(TOTAL), tempS = sd(TOTAL)) %>% 
@@ -156,3 +157,14 @@ colnames(temps)
 test <- lm(data = temps,
            mean ~ mSnow)
 summary(test); AIC(test)
+
+
+# csv ---------------------------------------------------------------------
+
+temps2 <- temps %>% 
+  select(c("Year", "t18", "t19",
+           "max", "mean",
+           "anomM", "tempM",
+           "aPNI", "mSnow"))
+
+write.csv(temps2,"temps_table.csv", row.names = F)

@@ -74,7 +74,12 @@ weekimp <- na_interpolation(x = weekly$SomT,
                             option = "linear")
 
 # Visualize imputations.
-ggplot_na_imputations(weekly$SomT, weekimp)
+ggplot_na_imputations(weekly$SomT, weekimp) +
+  ylab("Temperature (ºC)") + ggtitle(NULL,subtitle = NULL) +
+  mytheme + xlab("Week")
+
+ggsave("plots/imputed_somass.png", units = "px",
+       widt = 2000, height = 1200)
 
 # Assign to new object, specify if data are imputed or observed.
 impDF <- data.frame(wSom = as.numeric(weekimp),
@@ -187,7 +192,13 @@ dat <- dat %>%
 
 # Cubic looks appropriate for most years.
 # Some better than others (great = 2015, less great = 2019).
-tempR + geom_smooth(colour = "black") + 
+ggplot(data = dat %>% 
+         mutate(year = as.factor(year)),
+       aes(x = rAirL1,
+           y = wSom,
+           colour = year)) +
+  geom_point() + mytheme +
+  geom_smooth(colour = "black") + 
   facet_wrap(~year, scales = "free") +
   labs(x = "Air temperature (°C)",
        y = "Somass temperature (°C)") +
@@ -320,7 +331,7 @@ summary(h2)
 
 
 # See how harmonics coincide with air temperature data.
-exvar = as.data.frame(cbind(harmonics, airvars)) %>% 
+exvar <- as.data.frame(cbind(harmonics, airvars)) %>% 
   merge(., impDF, by = "date") %>% 
   mutate(f2 = `S1-52` + `C1-52`,
          fp2 = as.numeric(scale(1-f2)),
@@ -444,7 +455,7 @@ df2 <- data.frame(meanT = as.numeric(h2f$mean),
               aes(colour = type),
               alpha = 4/5) + 
     mytheme +
-    labs(x = "", y = "Somass River Temperature (°C)") +
+    labs(x = NULL, y = "Somass River Temperature (°C)") +
     theme(plot.margin = margin(5, 10, 0.1, 5, "pt")) +
     guides(colour = "none") +
   scale_x_date(date_breaks = "1 year",
@@ -470,4 +481,41 @@ gginnards::move_layers(zi2, "GeomPoint", position = "top")
 
 ggsave("plots/ARIMA_wTemp.png", units = "px",
        width = 2500, height = 2000)
+
+
+#Performance -------------------------------------------------------------------
+
+# Accuracy of model with covariates. 
+# Looks good: E.g., MAPE ~ 5.3, RMSE ~ 0.78, MPE ~ -0.30.
+accuracy(h2f)
+
+# Define forecasting function for cross-validation.
+fc <- function(y, h, xreg, newxreg) {
+  
+  # Parameters from original ARIMA models.
+  # No seasonality, use Fourier terms from earlier instead.
+  fit <- Arima(y, order =  c(1,0,0),
+               seasonal =  FALSE,
+               xreg     =  xreg)
+  
+  # Input values above. 
+  # Splitting into train and test data is automatic.
+  forecast(fit, xreg = newxreg, h = h)
+}
+
+# Perform cross-validation. 
+# Weekly Somass temperatures as time series, Fourier terms as covariates. 
+# Looking ahead h = 1:6 weeks.
+forcv <- tsCV(as.numeric(STS), fc,
+          h = 6, xreg = as.matrix(cbind(harmonics, 
+                                  airvars[,c(2:4)])))
+head(forcv,  15) # Check formatting.
+
+# Calculate RMSE for h = 1:6 and plot.
+cv_rmse <- apply(forcv, 2, FUN = function(x) sqrt(mean(x^2, na.rm = TRUE))) 
+plot(cv_rmse)
+
+# Calculate absolute error for  h = 1:6 and plot.
+cv_ae <- apply(forcv, 2, FUN = function(x) mean(abs(x), na.rm = TRUE))
+plot(cv_ae)
 
