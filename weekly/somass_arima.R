@@ -5,7 +5,7 @@
 library(tidyverse); library(tsibble); library(forecast)
 library(lubridate); library(zoo); library(gginnards)
 library(tseries); library(imputeTS); library(scales)
-library(broom)
+library(broom); library(svMisc)
 
 
 # Set working directory.
@@ -91,11 +91,15 @@ impDF <- data.frame(wSom = as.numeric(weekimp),
     date %ni% somass$date ~ "Imputed"
   ))
 
+# write.csv(impDF, "somass_weekly.csv", row.names = F)
+
 STS <- ts(as.numeric(impDF$wSom), # Set Somass temperatures as a time series object.
           frequency = 52)         # Weekly averages with annual seasonality.
 ns <- decompose(STS); plot(ns)    # View decomposition of time series data.
 plot(ns$seasonal)                 # Clearly strong seasonal component.
 
+(ffreq <- forecast::findfrequency(STS))
+all.equal(ffreq, 52)
 
 # Air temperature data ---------------------------------------------------------
 
@@ -105,12 +109,10 @@ airtemp <- read.csv("alberni_temps.csv") %>%
   mutate(date = as.Date(date)) %>% 
   dplyr::select(-rTemp)
 
-fullair <- as.data.frame(seq(min(airtemp$date),   # Make an object with all dates
-                             max(airtemp$date),   # between the max and min of the
-                             by = "days")) %>%    # air temperature data available.
+fullair <- as.data.frame(win) %>%    # air temperature data available.
   `colnames<-`(., c("date")) %>%                  # Rename column.
   merge(., airtemp, by = "date",                  # Merge with original air temp data.
-        all   = TRUE) %>%                         # Include rows with missing temp data.
+        all.x   = TRUE) %>%                         # Include rows with missing temp data.
   mutate(year = year(date),                       # Add year as grouping factor.
          doy  = yday(date))                       # Add day of the year.
 
@@ -124,7 +126,12 @@ airimp <- na_interpolation(x = fullair$MaxT,
 
 # Visualize imputed data.
 ggplot_na_imputations(fullair$MaxT, airimp,
-                      x_axis_labels = fullair$date)
+                      x_axis_labels = fullair$date) +
+  ylab("Temperature (ºC)") + ggtitle(NULL,subtitle = NULL) +
+  mytheme + xlab(NULL)
+
+ggsave("plots/air_temp_imp.png", units = "px",
+       width = 2000, height = 1200)
 
 air.impall <- data.frame(tImp = as.numeric(airimp),       # Store imputed data in DF.
                          date = fullair$date,             # Add date info.
@@ -292,9 +299,10 @@ h1 <- Arima(y = as.numeric(STS),     # Initial time series of temperatures (w/ i
             xreg = harmonics)        # Let modelled Fourier account for seasonality.
 
 
-png(file = "plots/residuals.png", 
-    units = 'px',
-    width = 1000, height = 400)      # For saving residual plot.
+png(file   =  "plots/residuals.png", 
+    units  =  'px',
+    width  =  1000, 
+    height =  400)      # For saving residual plot.
 h1 %>% checkresiduals(); dev.off()   # Inspect risiduals. Some issues but not abysmal.
 
 
@@ -331,50 +339,50 @@ summary(h2)
 
 
 # See how harmonics coincide with air temperature data.
-exvar <- as.data.frame(cbind(harmonics, airvars)) %>% 
-  merge(., impDF, by = "date") %>% 
-  mutate(f2 = `S1-52` + `C1-52`,
-         fp2 = as.numeric(scale(1-f2)),
-         airsc = as.numeric(scale(airL1)),
-         Somass = as.numeric(scale(wSom))) %>% 
-  rename("Fourier" = "fp2",
-         "Lagged (1-w) air temperature" = "airsc") %>% 
-  pivot_longer(cols = c("Fourier", "Lagged (1-w) air temperature", "Somass")) 
-
-
-(total <- ggplot() + 
-  geom_line(data = exvar,
-            aes(x = date, 
-                y = value, 
-                colour = name),
-            size = 1, alpha = 4/5) + 
-  mytheme + 
-    theme(legend.position = "top") +
-  scale_x_date(date_breaks = "1 year",
-               date_labels = "%Y") +
-  ylab("Scaled values") + xlab(NULL))
-
-
-(yr.fac <- ggplot() + 
-    geom_line(data = exvar[exvar$year != 2021,],
-              aes(x = date, 
-                  y = value, 
-                  colour = name),
-              size = 1, alpha = 4/5) + 
-    mytheme + theme(legend.position = "none") +
-    ylab("Scaled values") + xlab(NULL) + 
-    facet_wrap(~year, scales = "free", ncol = 2) +
-    scale_x_date(date_breaks = "2 month",
-                 date_labels = "%b"))
-
-
-cowplot::plot_grid(total, yr.fac, ncol = 1,
-                   rel_heights = c(0.4, 1),
-                   align = "V")
-
-
-ggsave("plots/fourierK2.png", units = "px",
-       width = 2500, height = 3000)
+# exvar <- as.data.frame(cbind(harmonics, airvars)) %>% 
+#   merge(., impDF, by = "date") %>% 
+#   mutate(f2 = `S1-52` + `C1-52`,
+#          fp2 = as.numeric(scale(1-f2)),
+#          airsc = as.numeric(scale(airL1)),
+#          Somass = as.numeric(scale(wSom))) %>% 
+#   rename("Fourier" = "fp2",
+#          "Lagged (1-w) air temperature" = "airsc") %>% 
+#   pivot_longer(cols = c("Fourier", "Lagged (1-w) air temperature", "Somass")) 
+# 
+# 
+# (total <- ggplot() + 
+#   geom_line(data = exvar,
+#             aes(x = date, 
+#                 y = value, 
+#                 colour = name),
+#             size = 1, alpha = 4/5) + 
+#   mytheme + 
+#     theme(legend.position = "top") +
+#   scale_x_date(date_breaks = "1 year",
+#                date_labels = "%Y") +
+#   ylab("Scaled values") + xlab(NULL))
+# 
+# 
+# (yr.fac <- ggplot() + 
+#     geom_line(data = exvar[exvar$year != 2021,],
+#               aes(x = date, 
+#                   y = value, 
+#                   colour = name),
+#               size = 1, alpha = 4/5) + 
+#     mytheme + theme(legend.position = "none") +
+#     ylab("Scaled values") + xlab(NULL) + 
+#     facet_wrap(~year, scales = "free", ncol = 2) +
+#     scale_x_date(date_breaks = "2 month",
+#                  date_labels = "%b"))
+# 
+# 
+# cowplot::plot_grid(total, yr.fac, ncol = 1,
+#                    rel_heights = c(0.4, 1),
+#                    align = "V")
+# 
+# 
+# ggsave("plots/fourierK2.png", units = "px",
+#        width = 2500, height = 3000)
 
 
 # Project air temperature out one months using current year only.
@@ -420,19 +428,15 @@ accuracy(h2f)
 
 # Coerce above data into a dataframe for ggplot.
 df2 <- data.frame(meanT = as.numeric(h2f$mean),
-                  lwr80 = as.numeric(h2f$lower[,1]),
                   lwr95 = as.numeric(h2f$lower[,2]),
-                  upr80 = as.numeric(h2f$upper[,1]),
                   upr95 = as.numeric(h2f$upper[,2]),
-                  date  = rep(max(impDF$date), fh) + seq(0, 7*(fh-1), 7),
+                  date  = rep(max(impDF$date), fh) + seq(7, 7*(fh), 7),
                   type  = "Forecasted") %>% 
   rbind(., impDF[,c(1:2)] %>% 
-          mutate(upr80  = NA, lwr80 = NA, 
-                 upr95  = NA, lwr95 = NA,
+          mutate(upr95  = NA, lwr95 = NA,
                  type   = "Observed") %>% 
          rename("meanT" = "wSom"))  %>% 
   rbind(., data.frame(meanT = fitted(h2f, h = 6),
-                      upr80 = NA, lwr80 = NA,
                       upr95 = NA, lwr95 = NA,
                       type = "Fitted",
                       date = impDF$date))
@@ -447,10 +451,7 @@ df2 <- data.frame(meanT = as.numeric(h2f$mean),
                alpha = c(1/8, 2/5, 1)) +
     geom_ribbon(aes(ymin = lwr95, ymax = upr95,
                     fill = type),
-                   alpha = 1/5) +
-    geom_ribbon(aes(ymin = lwr80, ymax = upr80,
-                    fill = type),
-                   alpha = 2/5) + 
+                   alpha = 1/5) + 
     geom_line(linewidth  = 1, 
               aes(colour = type),
               alpha = 4/5) + 
@@ -465,8 +466,8 @@ df2 <- data.frame(meanT = as.numeric(h2f$mean),
 zi2 <- full2 +
     geom_point(aes(colour = type), size = 2.5,
                alpha = 1/2) +
-    scale_x_date(limits = c(as.Date("2021-6-01"), 
-                            as.Date("2021-10-20")),
+    scale_x_date(limits = c(max(df2$date) - 140, 
+                            as.Date(max(df2$date))),
                  date_breaks = "1 month",
                  date_labels = "%b") +
     theme(legend.position = "none") +
@@ -489,6 +490,7 @@ ggsave("plots/ARIMA_wTemp.png", units = "px",
 # Looks good: E.g., MAPE ~ 5.3, RMSE ~ 0.78, MPE ~ -0.30.
 accuracy(h2f)
 
+
 # Define forecasting function for cross-validation.
 fc <- function(y, h, xreg, newxreg) {
   
@@ -507,15 +509,94 @@ fc <- function(y, h, xreg, newxreg) {
 # Weekly Somass temperatures as time series, Fourier terms as covariates. 
 # Looking ahead h = 1:6 weeks.
 forcv <- tsCV(as.numeric(STS), fc,
-          h = 6, xreg = as.matrix(cbind(harmonics, 
+          h = fh, xreg = as.matrix(cbind(harmonics, 
                                   airvars[,c(2:4)])))
 head(forcv,  15) # Check formatting.
 
 # Calculate RMSE for h = 1:6 and plot.
 cv_rmse <- apply(forcv, 2, FUN = function(x) sqrt(mean(x^2, na.rm = TRUE))) 
-plot(cv_rmse)
+plot(cv_rmse, xlab = "Forecast horizon (weeks)", ylab = "RMSE")
 
 # Calculate absolute error for  h = 1:6 and plot.
 cv_ae <- apply(forcv, 2, FUN = function(x) mean(abs(x), na.rm = TRUE))
-plot(cv_ae)
+plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAE")
 
+
+
+# -------------------------------------------------------------------------
+# Bootstrapping prediction intervals
+# https://otexts.com/fpp2/bootstrap.html
+# Try below with ARIMA 1,0,0 and Fourier?
+# https://stats.stackexchange.com/questions/35324/initialize-arima-simulations-with-different-time-series
+# https://stackoverflow.com/questions/14195782/simulate-arima-function-from-the-forecast-package
+# https://robjhyndman.com/hyndsight/simulating-from-a-specified-seasonal-arima-model/index.html
+# https://pkg.robjhyndman.com/forecast/reference/simulate.ets.html
+
+
+nsim <- 1000L # 10k simulations. 
+fh            # = 6 weeks.
+
+# Empty matrix to populate w/ for-loop.
+future <- matrix(NA, nrow = fh, ncol = nsim) 
+
+# For each of 1000 simulations, do the following:
+for(i in seq(nsim)) {
+  
+  # Simulate the best-performing model. 
+  future[,i] <- simulate(Arima(y = as.numeric(STS),
+                               order = c(1,0,0),
+                               seasonal = FALSE,
+                               xreg = harmonics),
+                         # 6 weeks of forecasted harmonics (~newxreg).
+                         xreg   = newharmonics, 
+                         # Goal is future values.
+                         future = TRUE,
+                         bootstrap = TRUE)
+  
+  # Print progress bar for each iteration. 
+  progress(i, nsim) }
+
+# Isolate simulated data in dataframe. 
+future_sims <- as.data.frame(future) %>% 
+  # h = forecast horizon (in weeks).
+  mutate(h = as.factor(paste(seq(1, 6, 1), 
+                             "weeks"))) %>% 
+  # Pivot to long-form for easier grouping. 
+  pivot_longer(cols = -c(h),
+               names_to  = "sim", 
+               values_to = "temp") %>% 
+  group_by(h) %>% 
+  # For each forecasted week, get mean temperature,
+  # and % of days (from simulation) above 18, 19, 20C. 
+  summarise(mean = mean(temp, na.rm = TRUE),
+            p18  = round(sum(temp > 18, na.rm = TRUE)/nsim*100, 1),
+            p19  = round(sum(temp > 19, na.rm = TRUE)/nsim*100, 1),
+            p20  = round(sum(temp > 20, na.rm = TRUE)/nsim*100, 1)) %>% 
+  mutate(date = max(impDF$date) + seq(7, 7*fh, 7))
+
+
+zi2 +
+  geom_text(data = future_sims,
+            aes(x = date, y = 21,
+                label = sprintf("%0.1f", p18)),
+            size = 3, hjust = 0) +
+  geom_text(data = future_sims,
+            aes(x = date, y = 22,
+                label = sprintf("%0.1f", p19)),
+            size = 3, hjust = 0) +
+  geom_text(data = future_sims,
+            aes(x = date, y = 23,
+                label = sprintf("%0.1f", p20)),
+            size = 3, hjust = 0) +
+  scale_y_continuous(limits = c(9, 24)) +
+  annotate("text", y = c(21, 22, 23), size = 3, 
+           label = c("p18  =", "p19  =",
+                     "p20  ="),
+           x = max(impDF$date)) 
+  
+
+ggsave("plots/forecast_wProbs.png", units = "px",
+       width = 2200, height = 1200)
+
+  
+# -------------------------------------------------------------------------
