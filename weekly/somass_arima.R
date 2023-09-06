@@ -94,7 +94,9 @@ impDF <- data.frame(wSom = as.numeric(weekimp),
 # write.csv(impDF, "somass_weekly.csv", row.names = F)
 
 STS <- ts(as.numeric(impDF$wSom), # Set Somass temperatures as a time series object.
-          frequency = 52)         # Weekly averages with annual seasonality.
+          frequency = 365.25/7)         # Weekly averages with annual seasonality.
+
+test <- as_tsibble(STS)
 ns <- decompose(STS); plot(ns)    # View decomposition of time series data.
 plot(ns$seasonal)                 # Clearly strong seasonal component.
 
@@ -325,6 +327,8 @@ airvars <- dat[,c("date", "rAirL1")] %>%
   rename("airL1" = "rAirL1") 
 
 
+
+
 # New ARIMA w/ air temp as a covariate.
 h2 <- Arima(y = as.numeric(STS),
             order = c(1,0,0),
@@ -424,22 +428,79 @@ h2.newvars <- as.data.frame(newharmonics) %>%
 h2f <- forecast(h2, xreg = as.matrix(h2.newvars)); head(h2f)
 plot(h2f) # Trajectory and prediction intervals seem reasonable.
 plot(h2f, xlim = c(230, 255))
-accuracy(h2f)
+
+################################################################################
+
+# fenced off code here experimental - 09/06/2023
 
 # Coerce above data into a dataframe for ggplot.
 df2 <- data.frame(meanT = as.numeric(h2f$mean),
                   lwr95 = as.numeric(h2f$lower[,2]),
                   upr95 = as.numeric(h2f$upper[,2]),
-                  date  = rep(max(impDF$date), fh) + seq(7, 7*(fh), 7),
+                  date  = rep(max(impDF$date), fh) + seq(fh, 7*(fh), 7),
                   type  = "Forecasted") %>% 
-  rbind(., impDF[,c(1:2)] %>% 
+  rbind(., impDF[, c(1:2)] %>%
           mutate(upr95  = NA, lwr95 = NA,
-                 type   = "Observed") %>% 
-         rename("meanT" = "wSom"))  %>% 
-  rbind(., data.frame(meanT = fitted(h2f, h = 6),
+                 type   = "Observed") %>%
+         rename("meanT" = "wSom"))  %>%
+  rbind(., data.frame(meanT = h2$fitted,
                       upr95 = NA, lwr95 = NA,
                       type = "Fitted",
                       date = impDF$date))
+
+# https://stackoverflow.com/questions/41237309/one-step-ahead-out-of-sample-forecast-from-only-one-value-received-at-a-time-i
+# data2 <- ts(impDF$wSom)
+# data1 <- ts(fitted(h2f), start = length(data2)+1)
+# data3 <- ts(h2f$fitted)
+# plot(data2)
+# lines(data1)
+# lines(data3, col = "blue")
+# 
+# plot(h2f$x, col = "red")
+# lines(fitted(h2f), col = "blue")
+# 
+# fits <- fitted(h2f, h = 6)
+
+forplot <- fortify(h2f) %>% 
+  mutate(date = c(impDF$date, rep(max(impDF$date), 
+                  fh) + seq(fh, 7*(fh), 7)))
+
+ggplot(data = forplot) +
+  geom_line(aes(x = date, y = Fitted), color = "red") +
+  geom_line(aes(x = date, y = Data), color = "blue")  +
+  mytheme +
+  labs(x = NULL, y = "Somass River Temperature (°C)") +
+  theme(plot.margin = margin(5, 10, 0.1, 5, "pt")) +
+  guides(colour = "none") +
+  geom_hline(yintercept = c(18,19,20),
+             colour = "red2",
+             linetype = "dashed",
+             alpha = c(1/8, 2/5, 1)) +
+  scale_x_date(limits = c(max(df2$date) - 190, 
+                          as.Date(max(df2$date))),
+               date_breaks = "1 month",
+               date_labels = "%b")
+
+
+(g <- autoplot(h2f) + forecast::autolayer(fitted(h2, h = 1)) +
+    forecast::autolayer(fitted(h2, h = 5)) +
+    forecast::autolayer(fitted(h2, h = 3)) +
+    theme_bw() + theme(legend.position = "top",
+                       legend.title = element_blank()) +
+    coord_cartesian(xlim = c(230, 255))) 
+
+testlist <- list()
+
+for (i in 1:fh) {
+  testlist[[i]] <- autoplot(h2f) + 
+    forecast::autolayer(fitted(h2f, h = as.numeric(i))) +
+  mytheme
+}
+
+
+
+
+################################################################################
 
 # Plot full time series. 
 (full2 <- ggplot(data  = df2,
@@ -486,11 +547,6 @@ ggsave("plots/ARIMA_wTemp.png", units = "px",
 
 #Performance -------------------------------------------------------------------
 
-# Accuracy of model with covariates. 
-# Looks good: E.g., MAPE ~ 5.3, RMSE ~ 0.78, MPE ~ -0.30.
-accuracy(h2f)
-
-
 # Define forecasting function for cross-validation.
 fc <- function(y, h, xreg, newxreg) {
   
@@ -502,8 +558,7 @@ fc <- function(y, h, xreg, newxreg) {
   
   # Input values above. 
   # Splitting into train and test data is automatic.
-  forecast(fit, xreg = newxreg, h = h)
-}
+  forecast(fit, xreg = newxreg, h = h) }
 
 # Perform cross-validation. 
 # Weekly Somass temperatures as time series, Fourier terms as covariates. 
@@ -513,28 +568,27 @@ forcv <- tsCV(as.numeric(STS), fc,
                                   airvars[,c(2:4)])))
 head(forcv,  15) # Check formatting.
 
+# For formatting subsequent base plots.
+par(mfrow = c(3,1), mar = c(5,5,2,2))
+
 # Calculate RMSE for h = 1:6 and plot.
-cv_rmse <- apply(forcv, 2, FUN = function(x) sqrt(mean(x^2, na.rm = TRUE))) 
-plot(cv_rmse, xlab = "Forecast horizon (weeks)", ylab = "RMSE")
+(cv_rmse <- apply(forcv, 2, FUN = function(x) sqrt(mean(x^2, na.rm = TRUE)))) 
+plot(cv_rmse, xlab = "Forecast horizon (weeks)", ylab = "RMSE", type = "b")
 
 # Calculate absolute error for  h = 1:6 and plot.
-cv_ae <- apply(forcv, 2, FUN = function(x) mean(abs(x), na.rm = TRUE))
-plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAE")
+(cv_ae <- apply(forcv, 2, FUN = function(x) mean(abs(x), na.rm = TRUE)))
+plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAE", type = "b")
+
+# Calculate mean absolute percent error for  h = 1:6 and plot.
+(cv_ae <- apply(forcv, 2, FUN = function(x) 100*mean(abs(x), na.rm = TRUE)))/as.numeric(h2f$mean)
+plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAPE", type = "b")
 
 
-
-# -------------------------------------------------------------------------
-# Bootstrapping prediction intervals
-# https://otexts.com/fpp2/bootstrap.html
-# Try below with ARIMA 1,0,0 and Fourier?
-# https://stats.stackexchange.com/questions/35324/initialize-arima-simulations-with-different-time-series
-# https://stackoverflow.com/questions/14195782/simulate-arima-function-from-the-forecast-package
-# https://robjhyndman.com/hyndsight/simulating-from-a-specified-seasonal-arima-model/index.html
-# https://pkg.robjhyndman.com/forecast/reference/simulate.ets.html
+# Prediction intervals at thresholds -------------------------------------------
 
 
 nsim <- 1000L # 10k simulations. 
-fh            # = 6 weeks.
+fh            # = 6 weeks. Defined earlier.
 
 # Empty matrix to populate w/ for-loop.
 future <- matrix(NA, nrow = fh, ncol = nsim) 
@@ -557,7 +611,7 @@ for(i in seq(nsim)) {
   progress(i, nsim) }
 
 # Isolate simulated data in dataframe. 
-future_sims <- as.data.frame(future) %>% 
+(future_sims <- as.data.frame(future) %>% 
   # h = forecast horizon (in weeks).
   mutate(h = as.factor(paste(seq(1, 6, 1), 
                              "weeks"))) %>% 
@@ -565,32 +619,44 @@ future_sims <- as.data.frame(future) %>%
   pivot_longer(cols = -c(h),
                names_to  = "sim", 
                values_to = "temp") %>% 
+  ggplot(data = ., aes(x = temp)) +
+  geom_histogram(fill = "gray90",
+                 color = "black") +
+    facet_wrap(. ~ h, scales = "free_x") +
+    mytheme +
+    labs(x = "Temperature (C)", y = NULL))
+
+ggsave("plots/simulated_tempdists.png", units = "px",
+       width = 2000, height = 1500)
+
+sim_summ <- future_sims %>% 
   group_by(h) %>% 
   # For each forecasted week, get mean temperature,
   # and % of days (from simulation) above 18, 19, 20C. 
   summarise(mean = mean(temp, na.rm = TRUE),
-            p18  = round(sum(temp > 18, na.rm = TRUE)/nsim*100, 1),
-            p19  = round(sum(temp > 19, na.rm = TRUE)/nsim*100, 1),
-            p20  = round(sum(temp > 20, na.rm = TRUE)/nsim*100, 1)) %>% 
-  mutate(date = max(impDF$date) + seq(7, 7*fh, 7))
+            p18  = round(sum(temp > 18, na.rm = TRUE)/nsim * 100, 1),
+            p19  = round(sum(temp > 19, na.rm = TRUE)/nsim * 100, 1),
+            p20  = round(sum(temp > 20, na.rm = TRUE)/nsim * 100, 1)) %>% 
+  mutate(date = max(impDF$date) + seq(7, 7*fh, 7)) 
 
 
 zi2 +
-  geom_text(data = future_sims,
+  geom_text(data = sim_summ,
             aes(x = date, y = 21,
                 label = sprintf("%0.1f", p18)),
             size = 3, hjust = 0) +
-  geom_text(data = future_sims,
+  geom_text(data = sim_summ,
             aes(x = date, y = 22,
                 label = sprintf("%0.1f", p19)),
             size = 3, hjust = 0) +
-  geom_text(data = future_sims,
+  geom_text(data = sim_summ,
             aes(x = date, y = 23,
                 label = sprintf("%0.1f", p20)),
             size = 3, hjust = 0) +
   scale_y_continuous(limits = c(9, 24)) +
   annotate("text", y = c(21, 22, 23), size = 3, 
-           label = c("p18  =", "p19  =",
+           label = c("p18  =", 
+                     "p19  =",
                      "p20  ="),
            x = max(impDF$date)) 
   
