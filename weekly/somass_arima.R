@@ -27,6 +27,18 @@ mytheme <- theme_bw() +
 "%ni%" <- Negate("%in%")
 
 
+
+# Notes -------------------------------------------------------------------
+
+
+# Got auto.arima to work finally.
+# Suggests using (2,1,1)(1,1,0) errors.
+# Looks better, but some major discrepencies in 2018 and 2020 (Mape ~ 15% @ h = 2).
+# Need to investigate effects of air temp and flow (?). 
+# and update code with auto.arima instead. 
+# Consider adding more years (???).
+
+
 # Explore time series data -----------------------------------------------------
 
 spot <- read.csv("Spot and Mean Daily Water Temp Data At Depth 21.09.21.csv") %>% 
@@ -39,7 +51,7 @@ spot <- read.csv("Spot and Mean Daily Water Temp Data At Depth 21.09.21.csv") %>
 
 max(spot$date)
 
-win <- seq(as.Date("2017-01-01"),         # Isolate study window in variable.
+win <- seq(as.Date("2013-01-01"),         # Isolate study window in variable.
            max(spot$date),                # Almost 9 full years
            by = "days")                   # of daily info.
 
@@ -96,7 +108,7 @@ impDF <- data.frame(wSom = as.numeric(weekimp),
 STS <- ts(as.numeric(impDF$wSom), # Set Somass temperatures as a time series object.
           frequency = 365.25/7)         # Weekly averages with annual seasonality.
 
-test <- as_tsibble(STS)
+# test <- as_tsibble(STS)
 ns <- decompose(STS); plot(ns)    # View decomposition of time series data.
 plot(ns$seasonal)                 # Clearly strong seasonal component.
 
@@ -285,7 +297,10 @@ for(i in 1:25) {                        # For fourier terms 1 - 50.
 }
 
 
-(bf <- ncol(bestfit$xreg)/2)         # Optimal number of Fourier terms.
+(aa.test <- auto.arima(STS))
+summary(aa.test)
+
+(bf <- ncol(bestfit$xreg))           # Optimal number of Fourier terms.
 bestfit$arma; bestfit                # Optimal model and error distribution.
 summary(bestfit)                     # Prints favourable summary stats.
 
@@ -295,11 +310,12 @@ harmonics <- fourier(STS,            # Fit optimal Fourier model to observed dat
 nrow(harmonics) == length(STS)       # Both 513 rows.
 
 
-h1 <- Arima(y = as.numeric(STS),     # Initial time series of temperatures (w/ imputations).
-            order = c(1,0,0),        # Fit ARIMA model to temperature data.
-            seasonal = FALSE,        # 
-            xreg = harmonics)        # Let modelled Fourier account for seasonality.
+# h1 <- Arima(y = as.numeric(STS),     # Initial time series of temperatures (w/ imputations).
+#             order = c(2,1,1),        # Fit ARIMA model to temperature data.
+#             seasonal = FALSE,        # 
+#             xreg = harmonics)        # Let modelled Fourier account for seasonality.
 
+summary(bestfit)
 
 png(file   =  "plots/residuals.png", 
     units  =  'px',
@@ -331,7 +347,7 @@ airvars <- dat[,c("date", "rAirL1")] %>%
 
 # New ARIMA w/ air temp as a covariate.
 h2 <- Arima(y = as.numeric(STS),
-            order = c(1,0,0),
+            order = c(2,1,1),
             seasonal = FALSE,
             xreg = as.matrix(cbind(harmonics, 
                    airvars[,c(2:4)])))
@@ -608,7 +624,8 @@ for(i in seq(nsim)) {
                          bootstrap = TRUE)
   
   # Print progress bar for each iteration. 
-  progress(i, nsim) }
+  progress(i, nsim) 
+}
 
 # Isolate simulated data in dataframe. 
 (future_sims <- as.data.frame(future) %>% 
@@ -655,10 +672,10 @@ zi2 +
             size = 3, hjust = 0) +
   scale_y_continuous(limits = c(9, 24)) +
   annotate("text", y = c(21, 22, 23), size = 3, 
-           label = c("p18  =", 
-                     "p19  =",
-                     "p20  ="),
-           x = max(impDF$date)) 
+           label = c("p18 (%) = ", 
+                     "p19 (%) = ",
+                     "p20 (%) = "),
+           x = max(impDF$date)-1) 
   
 
 ggsave("plots/forecast_wProbs.png", units = "px",
@@ -666,3 +683,136 @@ ggsave("plots/forecast_wProbs.png", units = "px",
 
   
 # -------------------------------------------------------------------------
+# Observed vs. Predicteed in June - July. 
+
+temps <- data.frame(wSom = as.numeric(weekimp),
+                    date = ymd(weekly$date),
+                    year = year(ymd(weekly$date))) 
+
+airm <- air.impall[,c("date", "rAir")] %>% 
+  filter(date %in% temps$date)
+
+
+dim(temps); dim(airm)
+
+
+ds <- temps %>% 
+  mutate(month = month(date)) %>% 
+  filter(month %in% c(6,7)) %>% 
+  select("date") %>% 
+  filter(row_number() <= n() - 1) %>% 
+  pull(date)
+
+# Isolate dates in June and July.
+# (ds <- impDF %>% 
+#       mutate(month = month(date)) %>% 
+#       filter(month %in% c(6, 7)) %>% 
+#    select("date") %>% 
+#    # Remove last date.
+#    filter(row_number() <= n()-1) %>% 
+#    # Convert to vector.
+#    pull(date))
+
+htest <- function(temp, harmonics, air, start, h) {
+  
+  # List of all variable sets.
+  df.vars <- list(temp = temp, air = air) 
+  
+  # Filter all data sets to relevant window.
+  dfFil <- lapply(df.vars, function(x)
+    x[c(which(temps$date == as.character(as.Date(start)), 
+              arr.ind = TRUE)[1]- 9*3):c(which(temps$date == as.character(as.Date(start)), 
+              arr.ind = TRUE)[1]),])
+  
+  # Observed temperatures for each window.w
+  obs <- df.vars[[1]][(nrow(dfFil[[1]])+1):(nrow(dfFil[[1]]) + h),]
+  
+  fit2 <- auto.arima(as.numeric(dfFil[[1]][,"wSom"]),
+                     xreg = as.matrix(dfFil[[2]][,c(2)]))
+  
+  # 2 future values of Fourier terms.
+  # newH <- df.vars[[2]][nrow(dfFil[[2]] + 1):(nrow(dfFil[[2]]) + h - 1), ]
+  # 2 future values of air temperature.
+  newA <- df.vars[[2]][nrow(dfFil[[2]] + 1):(nrow(dfFil[[2]]) + h - 1), 2]
+  # all future x regs.
+  # newV <- as.matrix(cbind(newH, newA))
+  
+  # Perform forecast. 
+  stf  <- forecast(fit2, xreg = as.matrix(newA), h = h)
+  
+  # Compare forecast accuracy with observed data.
+  for.acc <- forecast::accuracy(stf, as.numeric(obs$wSom)) %>% 
+    as.data.frame() %>% 
+    filter(rownames(.) %in% "Test set") %>% 
+    mutate(start  = start,
+           h      = h) %>% 
+    relocate(start, h) 
+  
+  return(list("for.acc" = for.acc, "stf" = as.data.frame(stf) %>% 
+  mutate(p.date  = start + 14,
+         year = year(p.date))))
+  
+}
+
+# Empty list for loop.
+vlist <- list()
+
+# For each unique date in June/July, run forecast and 
+# estimate model accuracy.
+for (i in 1:length(37:length(ds))) {
+  
+  vlist[[i]] <- htest(temp = temps, 
+        h = 2,
+        air = airm,
+        start = as.Date(ds[(37-1) + i]))
+  
+}
+
+(model_sums <- do.call(rbind, lapply(vlist, function(x) x$for.acc)))
+
+modyr <- model_sums %>% 
+  mutate(year = as.factor(year(ymd(start))),
+         h    = as.factor(h)) %>% 
+  group_by(year) %>% 
+  summarise_at(which(sapply(., is.numeric)), 
+               list(~mean(.), ~sd(.)))
+
+summary(model_sums$MAPE); hist(model_sums$MAPE)
+
+(model_pred <- do.call(rbind, lapply(vlist, function(x) x$stf[2,])) %>% 
+    rename("Forecasted" = `Point Forecast`) %>% 
+    mutate(year = year(p.date)) %>% 
+    relocate(p.date))
+
+
+ggplot(data = impDF %>% 
+         mutate(month = month(date)) %>% 
+         filter(month %in% c(6:7)) %>% 
+         filter(year > 2016),
+       aes(x = date,
+           y = wSom)) + 
+  geom_hline(yintercept = c(18,19,20),
+             colour = "red2",
+             linetype = "dashed") + 
+  geom_line(linewidth = 3/4) +
+  geom_point(fill = "white", 
+             shape = 21) + 
+  geom_point(data = model_pred,
+             aes(x = p.date,
+                 y = Forecasted),
+             shape = 21,
+             fill = "orange") + 
+  facet_wrap(~year, scales = "free") + 
+  mytheme +
+  labs(x = NULL, y = "Somass River Temperature (C)")
+
+ggsave("plots/junejuly_predObs_h2.png", 
+       units = "px", width = 3000,
+       height =1500)
+  
+
+
+  
+
+
+
