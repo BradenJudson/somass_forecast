@@ -28,122 +28,6 @@ mytheme <- theme_bw() +
 "%ni%" <- Negate("%in%")
 
 
-# Fix Somass TS ----------------------------------------------------------------
-# 
- sproatT <- read.csv("sproat_temps.csv") %>% 
-  mutate(year = year(date),
-         month = month(date)) %>% 
-  filter(year > 2016 & year %ni% c("2023", "2022")) %>% 
-  filter(month %in% 5:9) %>% 
-  merge(., impDF, all.x = TRUE, by = c("date")) %>% 
-  mutate(date = as.Date(date),
-         rSproat = rollapply(sproat, 14, mean, partial= T),
-         sproatL = dplyr::lead(rSproat, 4))  %>% 
-  tidyr::fill(sproatL, .direction = 'up')
-
-ggplot(data = sproatT) +
-  geom_line(aes(x = date, y = sproatL, group = 1)) +
-  geom_point(aes(x = date, y = wSom), color = "red") +
-  geom_line(aes(x = date, y = rSproat, group = 1), 
-            colour = "blue") +
-  geom_line(data = sproatT %>% 
-              filter(!is.na(wSom)),
-            aes(x = date, y = wSom, group = 1),
-            color = "red", size = 1/3) +
-  facet_wrap(~year.x, scales = "free") +
-  scale_x_date(date_breaks = "1 month",
-               date_labels = "%b") +
-  mytheme + labs(x = NULL, y = "Temperature (C)") +
-  scale_y_continuous(breaks = seq(0, 30, 3))
-
-aiclist <- list()
-
-for (i in 1:10) {
-  dat2 <- sproatT %>% 
-    mutate(lagSproat = dplyr::lead(rSproat, i)) %>% 
-    tidyr::fill(lagSproat, .direction = "up")
-  
-  fitL <- lm(data = dat2, wSom ~ lagSproat)
-  aiclist[i] <- AIC(fitL)
-}
-
-ggplot(data = sproatT,
-       aes(x = rSproat, y = wSom)) +
-  geom_point()
-
-# stampT  <- read.csv("stamp_temps.csv")
-# 
-# all_temps <- merge(sproatT, stampT, by = "date") %>% 
-#   mutate(month = month(date))
-# 
-# (stampFlow <- ggplot(data = stamp %>% 
-#          mutate(date = as.Date(date),
-#                 month = month(date),
-#                 year  = year(date)) %>% 
-#          filter(year %in% c(2017:2021)) %>% 
-#          filter(month %in% c(5:8)), 
-#        aes(x = date, 
-#            y = rStampSensor,
-#            group = 1)) +
-#   geom_line() +
-#   geom_point() +
-#   facet_wrap(~year, scales = "free", nrow = 1) + 
-#   scale_x_date(date_breaks = "1 month",
-#                date_labels = "%b %d") +
-#   labs(x = NULL, y = "Stamp Flow") + mytheme)
-# 
-# 
-# (somassT <- ggplot(data = somass %>% 
-#                      mutate(month = month(date),
-#                             year  = year(date)) %>% 
-#                      filter(month %in% 5:8), 
-#                   aes(x = date,
-#                       y = MeanWaterT,
-#                       group = 1)) +
-#     geom_line() +
-#   geom_point() +
-#     facet_wrap(~year, scales = "free", nrow = 1) +
-#     labs(x = NULL, y = "Somass temp") + mytheme)
-# 
-# 
-# (airplot <- ggplot(data= airtemp %>% 
-#                      mutate(date = as.Date(date),
-#                             year = year(date),
-#                             month = month(date),
-#                             rAir = rollapply(mAirT, 10, mean, partial = TRUE)) %>% 
-#                      filter(year %in% c(2017:2021)) %>% 
-#                      filter(month %in% c(5:8)), 
-#                   aes(x = date,
-#                       y = rAir)) +
-#     geom_line() +
-#     geom_point() +
-#     facet_wrap(~year, scales = "free", nrow = 1) +
-#     mytheme)
-# 
-# 
-# (stampTemp <- ggplot(stampT %>% 
-#                        mutate(date = as.Date(date),
-#                               month = month(date),
-#                               rTemp = rollapply(stamp, 7, mean, partial = TRUE)) %>% 
-#                        filter(year %in% c(2017:2021)) %>% 
-#                        filter(month %in% c(5:8)), 
-#                      aes(x = date, y = rTemp)) +
-#     geom_point() + 
-#     facet_wrap(~year, scales = "free", nrow = 1) +
-#     mytheme +
-#     labs(x = NULL, y= "Stamp temp") +
-#     geom_line() +
-#     scale_x_date(date_breaks = "1 month",
-#                  date_labels = "%b %d"))
-# 
-# 
-# 
-# cowplot::plot_grid(somassT, stampFlow, airplot, stampTemp, ncol = 1)
-# 
-# 
-
-
-
 # Explore time series data -----------------------------------------------------
 
 spot <- read.csv("Spot and Mean Daily Water Temp Data At Depth 21.09.21.csv") %>% 
@@ -334,6 +218,7 @@ for (i in 1:10) {
   mutate(lag = as.numeric(lag)) %>% 
   arrange(lag))
 
+
 # Lag = 1w is best fit.
 plot(j)
 
@@ -361,6 +246,7 @@ ggplot(data = dat %>%
 
 ggsave("plots/temp_dists.png", units = "px",
        width = 2000, height = 1500)
+
 
 # Assessing various model fits.
 #First, non-lagged models. 
@@ -391,6 +277,7 @@ write.csv(fits, "lm_fits.csv", row.names = F)
 anova(fit, fit2, fit3)  
 anova(fitL, fitL2, fitL3)
 
+
 # Everything above indicates that cubic polynomial with one week lagged air temp is the better model. 
 
 # Isolate air variables.
@@ -419,7 +306,20 @@ ggsave("plots/temp_lag_relationships.png", units = "px",
 
 # Flow effects -----------------------------------------------------------------
 
-# # Sproat river flows - m3/s.
+# Ash river flows - m3/s.
+ash <- hy_daily_flows(station_number = "08HB023",
+                      start_date = min(win)) %>%
+  mutate(year = as.factor(year(Date)),
+         rAsh = rollapply(Value, 14, mean,
+                             partial = TRUE)) %>%
+  dplyr::select(c("Date", "rAsh", "year")) %>%
+  `colnames<-`(., tolower(c(colnames(.)))) 
+
+# Isolate Ash flows. 
+ashFlow <- ash[ash$date %in% impDF$date, c("date", "rash")]
+
+
+# Sproat river flows - m3/s.
 sproat <- hy_daily_flows(station_number = "08HB008",
                          start_date = min(win)) %>%
   mutate(year = as.factor(year(Date)),
@@ -427,206 +327,112 @@ sproat <- hy_daily_flows(station_number = "08HB008",
                              partial = TRUE)) %>%
   dplyr::select(c("Date", "rSproat", "year")) %>%
   `colnames<-`(., tolower(c(colnames(.)))) 
+
+# Isolate Sproat flows. 
+sproatFlow <- sproat[sproat$date %in% impDF$date, c("date", "rsproat")]
  
-# All dates are accounted for. 
-nrow(sproat[sproat$date %in% impDF$date,]) == length(impDF$wSom)
+# Make sure all dates are accounted for. 
+nrow(ashFlow) == nrow(sproatFlow) & nrow(impDF)
 
-(sproatTS <- ggplot(data = sproat, aes(x = date, y = rsproat)) +
-  geom_line(size = 1) + mytheme +
-  labs(x = NULL, y = "Sproat discharge (cms)") +
-    scale_x_date(date_breaks = "1 year",
-                 date_labels = "%Y"))
+flows <- merge(ashFlow, sproatFlow, by = "date") %>% 
+  pivot_longer(cols = c("rash", "rsproat")) %>% 
+  mutate(name = tools::toTitleCase(sub('.', '', name)))
 
-(sproatWr <- ggplot(data = sproat %>% 
-                      mutate(year = year(date),
-                             month = month(date)) %>% 
-                      filter(month %in% 5:9),
-                    aes(x = date, y = rsproat)) +
-    geom_point(alpha = 1/3, size = 1) + facet_wrap(~year, scales = "free_x") +
-    mytheme + labs(x = NULL, y = "Sproat discharge (cms)"))
+(flowTS <- ggplot(data = flows, aes(x = date, y = value, colour = name)) +
+    geom_line(size = 1) + mytheme +
+    labs(x = NULL, y = "Discharge (cms)") +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+    theme(legend.position = "none"))
 
-SomSpr <- merge(impDF, sproat, by = c("date", "year"), 
-                all.x = TRUE) %>% 
-  mutate(Lflow1 = dplyr::lag(rsproat, 1),
-         Leadflow = dplyr::lead(rsproat, 4),
-         month = month(date)) %>% 
-  tidyr::fill(c(Lflow1, Leadflow), .direction = "up")
+(sumTS <- ggplot(data = flows %>% 
+                  mutate(year = year(date),
+                         month = month(date)) %>% 
+                  filter(month %in% 5:9),
+                aes(x = date, y = value, colour = name)) +
+    geom_line(size = 1) +
+    facet_wrap(~year, scales = "free_x") +
+    mytheme +
+    labs(x = NULL, y = "Discharge (cms)") +
+    theme(legend.position = c(0.9,0.2),
+          legend.justification = c(1,0)))
 
-cowplot::plot_grid(sproatTS, sproatWr, ncol = 1)
-ggsave("plots/sproat_flows.png", units = "px",
+cowplot::plot_grid(flowTS, sumTS, ncol = 1)
+ggsave("plots/flows.png", units = "px",
        width = 2000, height = 2500)
 
-ggplot(data = SomSpr %>% 
-         mutate(month = month(date)) %>% 
-         filter(month %in% 6:7),
-       aes(x = wSom, y = Leadflow)) +
-  geom_smooth(method = "lm") +
-  geom_point() + mytheme +
-  labs(x = "Somass temperature (C)",
-       y = "Stamp discharge (cms)") +
-  scale_x_continuous(breaks = seq(0, 25, 2)) +
-  scale_y_continuous(breaks = seq(0, 5, 1))
 
-(SprFit1 <- lm(data = SomSpr, wSom ~ rsproat)); summary(SprFit1)
-(SprFitL <- lm(data = SomSpr, wSom ~ Lflow1)); summary(SprFitL)
-(SprFitL2 <- lm(data = SomSpr, wSom ~ Lflow2)); summary(SprFitL2)
-(SprFit2 <- lm(data = SomSpr, wSom ~ I(log(rsproat)))); summary(SprFit2)
-anova(SprFit1, SprFitL, SprFitL2, SprFit2)
+# TS Model selection -----------------------------------------------------------
 
-flow <- SomSpr %>% 
-  mutate(log.Sproat = log(rsproat)) %>% 
-  select(c("date", "Leadflow"))
-
-# Model selection --------------------------------------------------------------
-
-
+# Define a funcion to test ARIMA with various covariate terms.
 arm.xreg <- function(xreg) {
+  # y = Somass temperatures.
   Arima(y = as.numeric(STS),
+        # Optimal error structure defined earlier.
         order = order,
         seasonal = FALSE,
+        # Covariates = Fourier terms and whatever else is defined.
         xreg = as.matrix(cbind(harmonics, xreg)))
 }
 
-(airReg <- arm.xreg(xreg = airvars[,c(2:4)]))
-(sprReg <- arm.xreg(xreg = flow[,2]))
-(botReg <- arm.xreg(xreg = cbind(airvars[,2:4], flow[,2])))
-(defReg <- arm.xreg(xreg = NULL))
+# Set up a list so the computation is vectorized. 
+# All covariates and select combinations of covariates. 
+xregs <- list(air = airvars[,2:4], sproat = sproatFlow[,2],
+              ash = ashFlow[,2],   harmonics = NULL,
+              bothFlow = cbind(sproatFlow[,2], ashFlow[,2]),
+              airFlow = cbind(airvars[,2:4], ashFlow[,2], sproatFlow[,2]))
 
-(modTests <- rbind(as.data.frame(accuracy(airReg)) %>% 
-                    mutate(AIC = AIC(airReg), 
-                           xreg = "Air"),
-                  as.data.frame(accuracy(sprReg)) %>% 
-                    mutate(AIC = AIC(sprReg),
-                           xreg = "Sproat"),
-                  as.data.frame(accuracy(botReg)) %>% 
-                    mutate(AIC = AIC(botReg),
-                           xreg = "Air and Flow"),
-                  as.data.frame(accuracy(defReg)) %>% 
-                    mutate(AIC = AIC(defReg),
-                           xreg = "Harmonics")) %>% 
-  relocate("xreg") %>% 
-  mutate(deltaAIC = round(AIC - min(AIC), 3))) 
+# Apply to all list elements simultaneously. 
+(xreg_mods <- lapply(xregs, arm.xreg))
+
+# Extract list values and reorganize into a data.frame.
+(mod_vals  <- as.data.frame(do.call(rbind, lapply(xreg_mods, accuracy))) %>% 
+    mutate(AIC  = c(do.call(rbind, lapply(xreg_mods, AIC))),
+           xreg = names(xregs),
+           deltaAIC = round(AIC - min(AIC), 2)) %>% 
+    relocate("xreg", "AIC", "deltaAIC") %>% 
+    # Present lowest relative AIC first.
+    arrange(deltaAIC)) 
+
+# Isolate the model with lowest relative AIC.
+(optMod <- xreg_mods[[mod_vals[mod_vals$deltaAIC == 0, 1]]])
 
 
-defReg %>% checkresiduals()
-sprReg %>% checkresiduals()
-botReg %>% checkresiduals()
-airReg %>% checkresiduals()
-
-arimaDF <- data.frame(obs  = as.numeric(STS),
+arimaDF <- data.frame(obs  = impDF$wSom,
                       date = impDF$date,
-                      h2   = fitted(sprReg, h = 2L)) %>% 
+                      h1   = fitted(optMod, h = 1),
+                      h2   = fitted(optMod, h = 2),
+                      h3   = fitted(optMod, h = 3),
+                      h4   = fitted(optMod, h = 4)) %>% 
   mutate(month = month(date),
-         year = year(date)) %>% 
-  filter(month %in% c(4:7))
+         year = year(date),
+         MAE  = abs(obs - h2)) %>% 
+  filter(month %in% c(4:9)) 
+
+armLF <- arimaDF %>% 
+  pivot_longer(cols = starts_with("h"), names_to = "h") %>% 
+  mutate(MAE = abs(obs - value))
+
+
+ggplot(data = armLF, 
+       aes(x = date, y = obs)) +
+  mytheme +
+  geom_line(aes(x = date, y = value, colour = h),
+            size = 2/3, alpha = 1, linetype=  2) +
+  geom_point(size = 2) +
+  facet_wrap(~year, scales = "free_x") +
+  labs(x = NULL, y = "Somass temperature (C)") +
+  scale_x_date(date_breaks = "1 month",
+               date_labels = "%b")
 
 ggplot(data = arimaDF) +
   geom_point(aes(x = date, y = obs), color = "red") +
-  geom_line(aes(x = date, y = h2), color = "blue",  alpha = 1/3) +
-  geom_point(aes(x = date, y = h2), color = "blue", alpha = 1/3) +
-  facet_wrap(~year, scales=  "free") + mytheme +
+  geom_line(aes(x = date, y = h2),   color = "blue", alpha = 1/3) +
+  geom_point(aes(x = date, y = h2),  color = "blue", alpha = 1/3) +
+  facet_wrap(~year, scales=  "free_x") + mytheme +
   labs(x = NULL, y = "Somass temperature (C)") +
-  ggtitle("Blue = modeled, Red = Observed")
-
-
-
-# Air temperature ---------------------------------------------------------
-
-# 
-# # New ARIMA w/ air temp as a covariate.
-# h2 <- Arima(y = as.numeric(STS),
-#             order = order,
-#             seasonal = FALSE,
-#             xreg = as.matrix(cbind(harmonics, 
-#                    airvars[,c(2:4)])))
-# 
-# 
-# # Check diagnostics.
-# h2 %>% checkresiduals()
-# summary(h2)
-# 
-# 
-# # Project air temperature out one months using current year only.
-# # NOTE THAT THIS IS LIKELY INACCURATE AS IT DOES NOT ACCOUNT FOR
-# # ANTICIPATED WEATHER CHANGES (e.g., PRECIPITATION or COOLING).
-# airTS <- ts(airvars[airvars$date > "2020-01-01", "airL1"], 
-#             frequency = 52)
-# 
-# # Forecast air temperatures out one month.
-# forecast(airTS, h = fh) %>% plot()
-# 
-# # Assign projected air temperature data to a DF.
-# # Below, I increase the projected air temperature variables by 1/4 such that they 
-# # match the observed temperature. This is just for exploration purposes. Also the 
-# # forecast of air temperature is highly imprecise and the trend appears to decline 
-# # more steeply than what would be expected in recent years.
-# # Use independent meteorological 14-day forecasts in future. 
-# 
-# prjAir <- as.data.frame(forecast(airTS, h = fh)) %>% 
-#   rename("airL1" = "Point Forecast") %>% 
-#   mutate(airL1 = airL1,
-#          airL2 = airL1^2,
-#          airL3 = airL1^3) %>% 
-#   dplyr::select(starts_with("air"))
-# 
-# 
-# # For experimentation only.
-# # prjAir[1:16,1] <- 30
-# # prjAir[1:16,2] <- 30^2
-# # prjAir[1:16,3] <- 30^3
-# 
-# 
-# # Bind projected air temperatures to Fourier terms.
-# h2.newvars <- as.data.frame(newharmonics) %>% 
-#   cbind(., prjAir)
-# 
-# 
-# # Forecast air temp + seasonality model using forecasted data.
-# h2f <- forecast(h2, xreg = as.matrix(h2.newvars)); head(h2f)
-# plot(h2f) # Trajectory and prediction intervals seem reasonable.
-# plot(h2f, xlim = c(230, 255))
-# 
-# # Plot full time series. 
-# (full2 <- ggplot(data  = df2,
-#                  aes(x = date,
-#                      y = meanT)) +
-#     geom_hline(yintercept = c(18,19,20),
-#                colour = "red2",
-#                linetype = "dashed",
-#                alpha = c(1/8, 2/5, 1)) +
-#     geom_ribbon(aes(ymin = lwr95, ymax = upr95,
-#                     fill = type),
-#                    alpha = 1/5) + 
-#     geom_line(linewidth  = 1, 
-#               aes(colour = type),
-#               alpha = 4/5) + 
-#     mytheme +
-#     labs(x = NULL, y = "Somass River Temperature (°C)") +
-#     theme(plot.margin = margin(5, 10, 0.1, 5, "pt")) +
-#     guides(colour = "none") +
-#   scale_x_date(date_breaks = "1 year",
-#                date_labels = "%Y"))
-# 
-# # Plot zoomed-in time series.
-# zi2 <- full2 +
-#     geom_point(aes(colour = type), size = 2.5,
-#                alpha = 1/2) +
-#     scale_x_date(limits = c(max(df2$date) - 140, 
-#                             as.Date(max(df2$date))),
-#                  date_breaks = "1 month",
-#                  date_labels = "%b") +
-#     theme(legend.position = "none") +
-#     scale_y_continuous(breaks = seq(2, 25, 4),
-#                        limits = c(9, 23))
-# gginnards::move_layers(zi2, "GeomPoint", position = "top")
-# 
-# # Combine full and zoomed in time series plots.
-# (comb2 <- cowplot::plot_grid(full2, zi2, ncol = 1,
-#                              rel_heights = c(1, 0.8),
-#                              align = "V"))
-# 
-# ggsave("plots/ARIMA_wTemp.png", units = "px",
-#        width = 2500, height = 2000)
+  ggtitle("Blue = modelled (h = 2), Red = Observed") +
+  scale_x_date(date_breaks = "1 month",
+               date_labels = "%b")
 
 
 #Performance -------------------------------------------------------------------
@@ -642,7 +448,9 @@ fc <- function(y, h, xreg, newxreg) {
   
   # Input values above. 
   # Splitting into train and test data is automatic.
-  forecast(fit, xreg = newxreg, h = h) }
+  forecast(fit, xreg = newxreg, h = h) 
+  
+}
 
 # Perform cross-validation. 
 # Weekly Somass temperatures as time series, Fourier terms as covariates. 
@@ -663,6 +471,10 @@ plot(cv_rmse, xlab = "Forecast horizon (weeks)", ylab = "RMSE", type = "b")
 (cv_ae <- apply(forcv, 2, FUN = function(x) mean(abs(x), na.rm = TRUE)))
 plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAE", type = "b")
 
+
+### NEEDS FIXING BELOW ### cvae
+
+
 # Calculate mean absolute percent error for  h = 1:6 and plot.
 (cv_ae <- apply(forcv, 2, FUN = function(x) 100*mean(abs(x), na.rm = TRUE)))/as.numeric(h2f$mean)
 plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAPE", type = "b")
@@ -679,15 +491,17 @@ future <- matrix(NA, nrow = fh, ncol = nsim)
 
 # For each of 1000 simulations, do the following:
 for(i in seq(nsim)) {
-  
+
   # Simulate the best-performing model. 
   future[,i] <- simulate(Arima(y = as.numeric(STS),
-                               order = c(1,0,0),
+                               order = order,
                                seasonal = FALSE,
                                xreg = harmonics),
-                         # 6 weeks of forecasted harmonics (~newxreg).
-                         xreg   = newharmonics, 
-                         # Goal is future values.
+                         # 4 weeks of forecasted harmonics (~ newxreg).
+                         xreg   = fourier(STS,
+                                          K = bf,
+                                          h = fh), 
+                         # Goal is future, bootstrapped values.
                          future = TRUE,
                          bootstrap = TRUE)
   
@@ -698,15 +512,18 @@ for(i in seq(nsim)) {
 # Isolate simulated data in dataframe. 
 (future_sims <- as.data.frame(future) %>% 
   # h = forecast horizon (in weeks).
-  mutate(h = as.factor(paste(seq(1, 6, 1), 
+  mutate(h = as.factor(paste(1:fh, 
                              "weeks"))) %>% 
   # Pivot to long-form for easier grouping. 
   pivot_longer(cols = -c(h),
                names_to  = "sim", 
                values_to = "temp") %>% 
-  ggplot(data = ., aes(x = temp)) +
-  geom_histogram(fill = "gray90",
-                 color = "black") +
+  mutate(d = as.Date(max(impDF$date) + 7*as.numeric(substr(x = h, 1, 1)))))
+  
+(simhist <- ggplot(data = future_sims, aes(x = temp)) +
+  geom_histogram(fill  = "gray95",
+                 color = "gray30",
+                 bins  = 50) +
     facet_wrap(. ~ h, scales = "free_x") +
     mytheme +
     labs(x = "Temperature (C)", y = NULL))
@@ -714,7 +531,7 @@ for(i in seq(nsim)) {
 ggsave("plots/simulated_tempdists.png", units = "px",
        width = 2000, height = 1500)
 
-sim_summ <- future_sims %>% 
+(sim_summ <- future_sims %>% 
   group_by(h) %>% 
   # For each forecasted week, get mean temperature,
   # and % of days (from simulation) above 18, 19, 20C. 
@@ -722,29 +539,49 @@ sim_summ <- future_sims %>%
             p18  = round(sum(temp > 18, na.rm = TRUE)/nsim * 100, 1),
             p19  = round(sum(temp > 19, na.rm = TRUE)/nsim * 100, 1),
             p20  = round(sum(temp > 20, na.rm = TRUE)/nsim * 100, 1)) %>% 
-  mutate(date = max(impDF$date) + seq(7, 7*fh, 7)) 
+  mutate(date = max(impDF$date) + seq(7, 7*fh, 7)))
 
-
-zi2 +
+(forecast_probs <- ggplot(data = impDF,
+       aes(x = date,
+           y = wSom)) +
+  geom_hline(yintercept = c(18,19,20),
+                          colour = "red2",
+                          linetype = "dashed",
+                          alpha = c(1/8, 2/5, 1)) +
+  geom_line(size = 1, colour = "black") +
+  geom_point(size = 2, shape = 21,
+             colour = "white",
+             fill = "black",
+             stroke = 2) + mytheme +
+  labs(x = NULL, y = "Somass temperature (C)") +
+  coord_cartesian(xlim = c(max(impDF$date) - 100,
+                           max(impDF$date) + 8*fh)) +
+  geom_boxplot(data = future_sims,
+               aes(x  = d, y = temp,
+                 group = h, width  = 8),
+              fill = "gray95",
+              alpha = 1/2,outlier.alpha = 0) +
+  scale_y_continuous(limits = c(min(future_sims$temp),
+                                max(impDF$wSom)+1),
+                     breaks = seq(1, 50, 3)) +
   geom_text(data = sim_summ,
-            aes(x = date, y = 21,
+            aes(x = date-3/2, y = 21,
                 label = sprintf("%0.1f", p18)),
             size = 3, hjust = 0) +
   geom_text(data = sim_summ,
-            aes(x = date, y = 22,
+            aes(x = date-3/2, y = 22,
                 label = sprintf("%0.1f", p19)),
             size = 3, hjust = 0) +
   geom_text(data = sim_summ,
-            aes(x = date, y = 23,
+            aes(x = date-3/2, y = 23,
                 label = sprintf("%0.1f", p20)),
             size = 3, hjust = 0) +
-  scale_y_continuous(limits = c(9, 24)) +
-  annotate("text", y = c(21, 22, 23), size = 3, 
-           label = c("p18 (%) = ", 
+  annotate("text", y = c(21, 22, 23), size = 3,
+           label = c("p18 (%) = ",
                      "p19 (%) = ",
                      "p20 (%) = "),
-           x = max(impDF$date)-1) 
-  
+           x = max(impDF$date)-1))
+
 
 ggsave("plots/forecast_wProbs.png", units = "px",
        width = 2200, height = 1200)
