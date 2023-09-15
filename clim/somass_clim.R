@@ -18,86 +18,6 @@ skip <- c("2007", "2009", "2011")
 
 '%ni%' <- Negate("%in%")
 
-# Predictors first:
-# 1. Snow pack -----------------------------------------------------------------
-
-# Mount Cokely snow pack data
-# https://aqrt.nrs.gov.bc.ca/Data/Location/Summary/Location/3B02A/Interval/Latest
-
-snow <- read.csv("DataSetExport-SD.Field Visits@3B02A-20230825160412.csv",
-                 skip = 2) %>% 
-  select(c(1,3)) %>% 
-  `colnames<-`(., c("date", "snow_cm")) %>% 
-  mutate(date  = mdy(sub(" .*", "", date)),
-         Year  = year(date),
-         month = month(date)) %>%
-  filter(month %in% c(1:4)) %>% 
-  group_by(Year) %>% 
-  summarise(mSnow = mean(snow_cm, na.rm = TRUE),
-            sSnow = sd(snow_cm, na.rm = TRUE),
-            nSnow = n())
-
-# Visualize snow pack time series.
-# Note missing data in 2019-2022.
-(snow.plot <- ggplot(data = snow %>% 
-         filter(Year > 1999), 
-       aes(x = Year, 
-           y = mSnow,
-           group = 1)) +
-  geom_line(alpha = 1/3, size = 3/4) +
-  geom_errorbar(aes(ymin = mSnow - sSnow,
-                    ymax = mSnow + sSnow),
-                alpha = 1/2,
-                width = 1/2) +
-  geom_point(size  = 3, colour = "white",
-             shape = 21, fill  = "black") + 
-  mytheme +
-  scale_x_continuous(breaks = seq(1900, 2100, 3)) +
-  scale_y_continuous(breaks = seq(0, 500, 100)) +
-  labs(x = NULL, y = "Mount Cokely snow pack (cm)"))
-
-ggsave("plots/cokely_snow.png", units = "px",
-       width = 2000, height = 1000)
-
-
-# Anomaly ----------------------------------------------------------------------
-
-# NOAA ocean index data.
-noaa <- read_table(file = "cpc.ncep.noaa.gov_data_indices_oni.ascii.txt") %>% 
-  filter(SEAS %in% c("JFM", "FMA", "MAM")) %>% 
-  group_by(YR) %>% 
-  summarise(anomM = mean(ANOM)) %>% 
-  filter(YR %in% annual$year) %>% 
-  rename("year" = "YR")
-
-(anom.plot <- ggplot(data = noaa,
-                    aes(x = year,
-                        y = anomM)) +
-    geom_line(alpha = 1/3, size  = 3/4) + 
-    geom_point(size = 3, shape = 21, 
-               color = "white", fill = "black") +
-    mytheme + labs(x = NULL, y = 'SST Anomaly Index') +
-    scale_x_continuous(breaks = seq(200, 2022, 2)))
-
-
-# PNI ---------------------------------------------------------------------
-
-pni <- read.csv("PNW_aPNI.csv", 
-                skip = 1, 
-                check.names = F) %>% 
-  select(c(Year, 'Annual aPNI')) %>% 
-  rename('aPNI' = 'Annual aPNI') %>% 
-  filter(Year %in% annual$year)
-
-(pni.plot <- ggplot(data = pni, 
-                    aes(x = Year, y = aPNI)) +
-    geom_line(alpha = 1/3, size  = 3/4) + 
-    geom_point(size = 3, shape = 21, 
-               color = "white", fill = "black") +
-    mytheme + labs(x = NULL, y = 'PNI') +
-    scale_x_continuous(breaks = seq(200, 2022, 2)))
-
-
 # Response variables:
 # ATUs -------------------------------------------------------------------------
 
@@ -180,7 +100,7 @@ somassPass <- pass %>%
                                na.rm = TRUE), 0)) %>% 
   mutate(date_adj = date - 5,
          year = year(date_adj),
-         weekSum = rollsumr(somass, k = 7, 
+         weekSum = zoo::rollsumr(somass, k = 7, 
                             fill  = somass, 
                             align = "right")) %>% 
   merge(., som[,c(1:2)],   all.x  = FALSE,
@@ -200,6 +120,88 @@ somassPass <- pass %>%
     mytheme +
     labs(x = NULL, y = "Exposure Index") +
     scale_x_continuous(breaks = seq(2000, 2025, 2)))
+
+
+
+# Predictors first:
+# 1. Snow pack -----------------------------------------------------------------
+
+# Mount Cokely snow pack data
+# https://aqrt.nrs.gov.bc.ca/Data/Location/Summary/Location/3B02A/Interval/Latest
+
+snow <- read.csv("DataSetExport-SD.Field Visits@3B02A-20230825160412.csv",
+                 skip = 2) %>% 
+  select(c(1,3)) %>% 
+  `colnames<-`(., c("date", "snow_cm")) %>% 
+  mutate(date  = mdy(sub(" .*", "", date)),
+         Year  = year(date),
+         month = month(date)) %>%
+  filter(month %in% c(1:4)) %>% 
+  group_by(Year) %>% 
+  summarise(mSnow = mean(snow_cm, na.rm = TRUE),
+            sSnow = sd(snow_cm, na.rm = TRUE),
+            nSnow = n())
+
+# Visualize snow pack time series.
+# Note missing data in 2019-2022.
+(snow.plot <- ggplot(data = snow %>% 
+         filter(Year > 1999), 
+       aes(x = Year, 
+           y = mSnow,
+           group = 1)) +
+  geom_line(alpha = 1/3, size = 3/4) +
+  geom_errorbar(aes(ymin = mSnow - sSnow,
+                    ymax = mSnow + sSnow),
+                alpha = 1/2,
+                width = 1/2) +
+  geom_point(size  = 3, colour = "white",
+             shape = 21, fill  = "black") + 
+  mytheme +
+  scale_x_continuous(breaks = seq(1900, 2100, 3)) +
+  scale_y_continuous(breaks = seq(0, 500, 100)) +
+  labs(x = NULL, y = "Mount Cokely snow pack (cm)"))
+
+ggsave("plots/cokely_snow.png", units = "px",
+       width = 2000, height = 1000)
+
+
+# Anomaly ----------------------------------------------------------------------
+
+# NOAA ocean index data.
+noaa <- read_table(file = "cpc.ncep.noaa.gov_data_indices_oni.ascii.txt") %>% 
+  filter(SEAS %in% c("JFM", "FMA", "MAM")) %>% 
+  group_by(YR) %>% 
+  summarise(anomM = mean(ANOM)) %>% 
+  filter(YR %in% annual$year) %>% 
+  rename("year" = "YR")
+
+(anom.plot <- ggplot(data = noaa,
+                    aes(x = year,
+                        y = anomM)) +
+    geom_line(alpha = 1/3, size  = 3/4) + 
+    geom_point(size = 3, shape = 21, 
+               color = "white", fill = "black") +
+    mytheme + labs(x = NULL, y = 'SST Anomaly Index') +
+    scale_x_continuous(breaks = seq(200, 2022, 2)))
+
+
+# PNI ---------------------------------------------------------------------
+
+pni <- read.csv("PNW_aPNI.csv", 
+                skip = 1, 
+                check.names = F) %>% 
+  select(c(Year, 'Annual aPNI')) %>% 
+  rename('aPNI' = 'Annual aPNI') %>% 
+  filter(Year %in% annual$year)
+
+(pni.plot <- ggplot(data = pni, 
+                    aes(x = Year, y = aPNI)) +
+    geom_line(alpha = 1/3, size  = 3/4) + 
+    geom_point(size = 3, shape = 21, 
+               color = "white", fill = "black") +
+    mytheme + labs(x = NULL, y = 'PNI') +
+    scale_x_continuous(breaks = seq(200, 2022, 2)))
+
 
 
 # -------------------------------------------------------------------------
@@ -239,10 +241,12 @@ resp.list <- list(ExposureIndex, MaximumTemp, ATUs)
 
 library(ggrepel)
 
-testfun <- function(x) {
+multiplot <- function(x) {
   
  newdf <- merge(x, predvars, by = "year") %>% 
-   mutate(yr = substr(year, 3,4))
+   mutate(yr = substr(year, 3, 4)) 
+
+ ceiling <- max(newdf$val.x)
   
  ggplot(data = newdf, 
         aes(x = val.y,
@@ -252,18 +256,21 @@ testfun <- function(x) {
                alpha = 1/6,
                color = "black",
                linetype = "dashed")  +
+   scale_y_continuous(expand = c(0, ceiling*0.08)) +
    geom_point(size = 2,
               shape = 21,
               colour = "black",
               fill   = "gray50") +
    facet_wrap(~ var.y, scales = "free_x") +
-   labs(x = NULL)
-  
+   labs(x = NULL, y = unique(newdf$var.x)) +
+   stat_poly_eq(use_label(c("R2", "p")),
+                label.x = "left",
+                label.y = "top",
+                small.p = TRUE)
+ 
   }
 
-testfun(ATUs)
-
-ps <- lapply(resp.list, testfun)
+ps <- lapply(resp.list, multiplot)
 
 cowplot::plot_grid(ps[[1]] + theme(strip.background = element_blank()),
                    ps[[2]] + theme(strip.background = element_blank(),
@@ -278,56 +285,6 @@ ggsave("plots/var_cors.png", units= "px",
 
 ################################################################################
 
-PNI <- pni %>% 
-  mutate(type = "predictor",
-         var  = "Pacific Northwest Index") %>% 
-  rename("year" = "Year",
-         "val"  = "aPNI")
 
-SSTanom <- noaa %>% 
-  mutate(type = "predictor",
-         var  = "Sea Surface Temperature Anomaly Index") %>% 
-  rename("val" = "anomM")
-  
-Cokely <- snow[,c(1:2)] %>% 
-  mutate(type = "predictor",
-         var  = "Mount Cokely Snow pack (cm)") %>% 
-  rename("year" = "Year",
-         "val"  = "mSnow")
-
-responsevars <- cbind(ExposureIndex, MaximumTemp, ATUs)
-predvars <- rbind(Cokely, SSTanom, PNI)
-
-(expfac <- merge(ExposureIndex, predvars, by = "year") %>% 
-ggplot(data = ., aes(x = val.y, 
-                         y = val.x)) + 
-  geom_point() + facet_wrap(~var.y, scales = "free"))
-
-(atufac <- merge(ATUs, predvars, by = "year") %>% 
-  ggplot(data = ., aes(x = val.y, y = val.x)) +
-  geom_point() + facet_wrap(~var.y, scales = "free"))
-
-cowplot::plot_grid(exp.plot, atu.plot, ncol = 1, align = "v")
-
-mdat <- merge(responsevars, predvars, by = "year") %>% 
-  select(1,2,4,5,7) %>% 
-  rename("Response" = "var.x",
-         "Prediction" = "var.y")
-
-ggplot(data = mdat, 
-       aes(x = val.x, y= val.y)) +
-  geom_point() +
-  facet_wrap(~var.x+var.y, scales = "free")
-
-ggplot(data = dat,)
-
-
-# -------------------------------------------------------------------------
-
-cowplot::plot_grid(atu.plot, pni.plot, 
-                   exp.plot, temp, ncol = 1, align = "v")
-
-ggsave("plots/stack_timeseries.png", units = "px",
-       width = 2000, height = 2500)
 
 

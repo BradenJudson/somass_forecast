@@ -512,8 +512,7 @@ for(i in seq(nsim)) {
 # Isolate simulated data in dataframe. 
 (future_sims <- as.data.frame(future) %>% 
   # h = forecast horizon (in weeks).
-  mutate(h = as.factor(paste(1:fh, 
-                             "weeks"))) %>% 
+  mutate(h = as.factor(paste(1:fh, "weeks"))) %>% 
   # Pivot to long-form for easier grouping. 
   pivot_longer(cols = -c(h),
                names_to  = "sim", 
