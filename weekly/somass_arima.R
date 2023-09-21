@@ -76,7 +76,8 @@ weekimp <- na_interpolation(x = weekly$SomT,
 
 # Visualize imputations.
 ggplot_na_imputations(weekly$SomT, weekimp) +
-  ylab("Temperature (ºC)") + ggtitle(NULL,subtitle = NULL) +
+  ylab("Temperature (ºC)") + 
+  ggtitle(NULL, subtitle = NULL) +
   mytheme + xlab("Week")
 
 ggsave("plots/imputed_somass.png", units = "px",
@@ -140,11 +141,11 @@ airtemp <- read.csv("alberni_temps.csv") %>%
   dplyr::select(-rTemp)
 
 fullair <- as.data.frame(win) %>%    # air temperature data available.
-  `colnames<-`(., c("date")) %>%                  # Rename column.
-  merge(., airtemp, by = "date",                  # Merge with original air temp data.
-        all.x   = TRUE) %>%                         # Include rows with missing temp data.
-  mutate(year = year(date),                       # Add year as grouping factor.
-         doy  = yday(date))                       # Add day of the year.
+  `colnames<-`(., c("date")) %>%     # Rename column.
+  merge(., airtemp, by = "date",     # Merge with original air temp data.
+        all.x   = TRUE) %>%          # Include rows with missing temp data.
+  mutate(year = year(date),          # Add year as grouping factor.
+         doy  = yday(date))          # Add day of the year.
 
 # Plot distribution of NAs.
 ggplot_na_distribution(fullair$MaxT,
@@ -288,9 +289,9 @@ airvars <- dat[,c("date", "rAirL1")] %>%
 
 # Yearly timeseries for lagged and non-lagged temperatures.
 ggplot(data = dat[dat$year != "2021", ] %>% 
-         mutate("Air temperature (C)"        = scale(rAir),
-                "Lagged air temperature (C)" = scale(rAirL1),
-                "Somass temperature (C)"     = scale(wSom)) %>% 
+         mutate("Air temperature (°C)"        = scale(rAir),
+                "Lagged air temperature (°C)" = scale(rAirL1),
+                "Somass temperature (°C)"     = scale(wSom)) %>% 
          pivot_longer(cols = c(6:8)),
        aes(x = date, y = value, colour = name)) +
   geom_line(alpha = 3/4, size = 3/4) +
@@ -301,7 +302,6 @@ ggplot(data = dat[dat$year != "2021", ] %>%
 
 ggsave("plots/temp_lag_relationships.png", units = "px",
        width = 2250, height = 2000)
-
 
 
 # Flow effects -----------------------------------------------------------------
@@ -376,8 +376,10 @@ arm.xreg <- function(xreg) {
 
 # Set up a list so the computation is vectorized. 
 # All covariates and select combinations of covariates. 
-xregs <- list(air = airvars[,2:4], sproat = sproatFlow[,2],
-              ash = ashFlow[,2],   harmonics = NULL,
+xregs <- list(air = airvars[,2:4], 
+              sproat = sproatFlow[,2],
+              ash = ashFlow[,2],   
+              harmonics = NULL,
               bothFlow = cbind(sproatFlow[,2], ashFlow[,2]),
               airFlow = cbind(airvars[,2:4], ashFlow[,2], sproatFlow[,2]))
 
@@ -385,13 +387,15 @@ xregs <- list(air = airvars[,2:4], sproat = sproatFlow[,2],
 (xreg_mods <- lapply(xregs, arm.xreg))
 
 # Extract list values and reorganize into a data.frame.
-(mod_vals  <- as.data.frame(do.call(rbind, lapply(xreg_mods, accuracy))) %>% 
+(mod_vals  <- as.data.frame(do.call(rbind,
+              lapply(xreg_mods, accuracy))) %>% 
     mutate(AIC  = c(do.call(rbind, lapply(xreg_mods, AIC))),
            xreg = names(xregs),
            deltaAIC = round(AIC - min(AIC), 2)) %>% 
     relocate("xreg", "AIC", "deltaAIC") %>% 
     # Present lowest relative AIC first.
-    arrange(deltaAIC)) 
+    arrange(deltaAIC) %>% 
+    `rownames<-`(., c(seq(1, nrow(.), 1)))) 
 
 # Isolate the model with lowest relative AIC.
 (optMod <- xreg_mods[[mod_vals[mod_vals$deltaAIC == 0, 1]]])
@@ -405,22 +409,37 @@ arimaDF <- data.frame(obs  = impDF$wSom,
                       h4   = fitted(optMod, h = 4)) %>% 
   mutate(month = month(date),
          year = year(date),
-         MAE  = abs(obs - h2)) %>% 
+         MAE2  = abs(obs - h2)) %>% 
   filter(month %in% c(4:9)) 
 
+
 armLF <- arimaDF %>% 
-  pivot_longer(cols = starts_with("h"), names_to = "h") %>% 
+  pivot_longer(cols = starts_with("h"), 
+               names_to = "h") %>% 
   mutate(MAE = abs(obs - value))
 
+###############################################
+#### LEFT OFF HERE SEPT 20, 5pm
+# calculate MAE by hand by group
+# set up function, can do MAE, MAPE, etc.
+
+armLF %>% 
+  group_by(h) %>% 
+  mutate(error = abs(obs - value)) %>% 
+  summarise(MAE  = mean(error),
+            RMSE = sqrt(mean(error^2)),
+            MAPE = 100*mean(error/obs)) %>% 
+  
+################################################
 
 ggplot(data = armLF, 
        aes(x = date, y = obs)) +
   mytheme +
   geom_line(aes(x = date, y = value, colour = h),
-            size = 2/3, alpha = 1, linetype=  2) +
-  geom_point(size = 2) +
+            size = 2/3, alpha = 1, linetype=  1) +
+  geom_point(size = 2, alpha = 1/8) +
   facet_wrap(~year, scales = "free_x") +
-  labs(x = NULL, y = "Somass temperature (C)") +
+  labs(x = NULL, y = "Somass temperature (°C)") +
   scale_x_date(date_breaks = "1 month",
                date_labels = "%b")
 
@@ -429,13 +448,17 @@ ggplot(data = arimaDF) +
   geom_line(aes(x = date, y = h2),   color = "blue", alpha = 1/3) +
   geom_point(aes(x = date, y = h2),  color = "blue", alpha = 1/3) +
   facet_wrap(~year, scales=  "free_x") + mytheme +
-  labs(x = NULL, y = "Somass temperature (C)") +
+  labs(x = NULL, y = "Somass temperature (°C)") +
   ggtitle("Blue = modelled (h = 2), Red = Observed") +
   scale_x_date(date_breaks = "1 month",
                date_labels = "%b")
 
+ggsave("plots/test_validationh2.png", units = "px",
+       width = 2500, height = 1500)
+
 
 #Performance -------------------------------------------------------------------
+
 
 # Define forecasting function for cross-validation.
 fc <- function(y, h, xreg, newxreg) {
@@ -454,14 +477,14 @@ fc <- function(y, h, xreg, newxreg) {
 
 # Perform cross-validation. 
 # Weekly Somass temperatures as time series, Fourier terms as covariates. 
-# Looking ahead h = 1:6 weeks.
+# Looking ahead h = 1:4 weeks.
 forcv <- tsCV(as.numeric(STS), fc,
           h = fh, xreg = as.matrix(cbind(harmonics, 
                                   airvars[,c(2:4)])))
 head(forcv,  15) # Check formatting.
 
 # For formatting subsequent base plots.
-par(mfrow = c(3,1), mar = c(5,5,2,2))
+par(mfrow = c(3,1), mar = c(5,5,1,1))
 
 # Calculate RMSE for h = 1:6 and plot.
 (cv_rmse <- apply(forcv, 2, FUN = function(x) sqrt(mean(x^2, na.rm = TRUE)))) 
@@ -471,12 +494,8 @@ plot(cv_rmse, xlab = "Forecast horizon (weeks)", ylab = "RMSE", type = "b")
 (cv_ae <- apply(forcv, 2, FUN = function(x) mean(abs(x), na.rm = TRUE)))
 plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAE", type = "b")
 
-
-### NEEDS FIXING BELOW ### cvae
-
-
 # Calculate mean absolute percent error for  h = 1:6 and plot.
-(cv_ae <- apply(forcv, 2, FUN = function(x) 100*mean(abs(x), na.rm = TRUE)))/as.numeric(h2f$mean)
+(cv_ae <- apply(forcv, 2, FUN = function(x) 100*mean(abs(x)/STS, na.rm = TRUE)))
 plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAPE", type = "b")
 
 
@@ -525,7 +544,7 @@ for(i in seq(nsim)) {
                  bins  = 50) +
     facet_wrap(. ~ h, scales = "free_x") +
     mytheme +
-    labs(x = "Temperature (C)", y = NULL))
+    labs(x = "Temperature (°C)", y = NULL))
 
 ggsave("plots/simulated_tempdists.png", units = "px",
        width = 2000, height = 1500)
@@ -540,6 +559,7 @@ ggsave("plots/simulated_tempdists.png", units = "px",
             p20  = round(sum(temp > 20, na.rm = TRUE)/nsim * 100, 1)) %>% 
   mutate(date = max(impDF$date) + seq(7, 7*fh, 7)))
 
+
 (forecast_probs <- ggplot(data = impDF,
        aes(x = date,
            y = wSom)) +
@@ -552,7 +572,7 @@ ggsave("plots/simulated_tempdists.png", units = "px",
              colour = "white",
              fill = "black",
              stroke = 2) + mytheme +
-  labs(x = NULL, y = "Somass temperature (C)") +
+  labs(x = NULL, y = "Somass temperature (°C)") +
   coord_cartesian(xlim = c(max(impDF$date) - 100,
                            max(impDF$date) + 8*fh)) +
   geom_boxplot(data = future_sims,
@@ -586,4 +606,119 @@ ggsave("plots/forecast_wProbs.png", units = "px",
        width = 2200, height = 1200)
 
   
-# -------------------------------------------------------------------------
+# LM ---------------------------------------------------------------------------
+
+
+# Combine variables into a single dataframe (by date - weekly).
+all.vars <- merge(impDF, airtemp) %>% 
+  merge(., flows[flows$name == "Sproat",]) %>% 
+  mutate(month = month(date))
+
+# Function for visualizing relationships. 
+tempPlot <- function(df, pred) {
+  # predictor variable is adjustable. 
+  ggplot(data = df, aes(x = {{ pred }}, y = wSom)) +
+    # Jitter helps visualization. 
+    geom_smooth(method = "lm", alpha = 1/4, linetype = 2) +
+    geom_jitter(size = 2, alpha = 1/2,
+                width = 2, height = 1) + mytheme +
+    labs(y = "Somass temperature (°C)")
+}
+
+# Apply function to both variables of interest.
+# Use cowplot to arrange into a single figure and save.
+# Adjust x-axis label at this stage.
+cplot <- cowplot::plot_grid(tempPlot(df = all.vars, pred = value) + 
+                   xlab("Sproat River flow (cms)"),
+         tempPlot(df = all.vars, pred = mAirT) + 
+         xlab("Port Alberni air temperature (°C)"),
+         align = "v", ncol = 1)
+
+
+ggsave("plots/temp_relationships.png", units = "px",
+       width = 2000, height = 2000)
+
+# Set up blank list.
+fitlist <- list(); n <- 1
+
+# Perform linear model with polynomials of flow and air temp.
+# For orders 1 - 5 for both variables and all combinations. 
+for (i in 1:5) {
+  for (k in 1:5) {
+    # Set up generalized polynomial model form. 
+    model <- lm(wSom ~ poly(value, i) + poly(mAirT, k) + year, data = all.vars)
+    # Assign to position in the list using broom to tidy outputs.
+    fitlist[[n]] <- broom::glance(model) %>% 
+      # Create column for expression.
+      mutate(call = paste0("Somass ~ poly(Sproat Flow, ", i, 
+                           ") + poly(Air Temp, ", k, ")"))
+    # Increase position in list each iteration through i and k.
+    n <- n + 1
+  }
+}
+
+# Coerce all of the model outputs into a single dataframe. 
+polyMods <- do.call(rbind, fitlist) %>% 
+  # Relative AIC values, rounded.
+  mutate(deltaAIC = round(AIC - min(AIC), 3)) %>% 
+  relocate(call, AIC, deltaAIC) %>% 
+  # Put lowest relative AIC values at the top.
+  arrange(deltaAIC)
+
+# Isolate call for the model with the lowest relative AIC.
+(optCall <- as.character(polyMods[which.min(polyMods$deltaAIC), 1]))
+# Optimal polynomial order for flow.
+(opti <- as.numeric(substr(optCall, 28, 28)))
+# Optimal polynomial order for air temperature.
+(optk <- as.numeric(substr(optCall, 48, 48)))
+# Input into model. 
+(optReg <- lm(data = all.vars, formula = wSom ~ poly(value, opti) + poly(mAirT, optk) + year))
+# Visualize residuals and test for normality. 
+hist(optReg$residuals, main = NULL, xlab = "Residuals"); shapiro.test(optReg$residuals)
+
+# Add fitted values to original dataframe for comparison.
+all.vars$fitted <- optReg$fitted.values
+
+# Plot expected vs. observed timeseries. 
+ggplot(data = all.vars %>% 
+         mutate(month = month(date)) %>% 
+         filter(month < 9 & month > 3), 
+       aes(x = date)) +
+  mytheme +
+  geom_line(aes(y = fitted), size = 1,
+            color = "skyblue3", alpha = 4/5) +
+  geom_point(aes(y = wSom), size = 14/8,
+             shape = 21, colour = "black",
+             fill = "gray50", alpha = 2/3) +
+  facet_wrap(~year, scales = "free_x") +
+  labs(x = NULL, y = "Somass temperature (°C)") +
+  scale_y_continuous(labels = scales::number_format(accuracy = 1)) +
+  theme(axis.text.x = element_text(size = 8)) +
+  scale_x_date(date_breaks = "1 month",
+               date_labels = "%b")
+
+ggsave("plots/lm_fitted_observed.png", units = "px",
+       width = 2500, height = 1800)
+  
+(lm.err <- all.vars %>% 
+  mutate(error = abs(fitted - wSom)) %>% 
+  summarise(rmse = sqrt(mean(error^2)),
+            abse = mean(error),
+            mape = 100*mean(error/wSom)))
+
+# Idea: Can I simulate predictions from LM above AND from the ARIMA model
+# combine them and get an improved prediction using an average of historical patterns
+# and anticipated environmental conditions? 
+# maybe: https://stats.stackexchange.com/questions/560184/how-to-average-several-posteriors-distributions-from-a-monte-carlo-simulation
+# Also look into distribution convolution.
+# https://stackoverflow.com/questions/23569133/adding-two-random-variables-via-convolution-in-r
+# https://www.countbayesie.com/blog/2022/11/30/understanding-convolutions-in-probability-a-mad-science-perspective
+
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################

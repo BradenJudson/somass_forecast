@@ -123,7 +123,22 @@ somassPass <- pass %>%
 
 
 
-# Predictors first:
+sproatpass <- pass[pass$river == "Sproat River", ] %>% 
+  filter(year %in% annual$year) %>% 
+  group_by(year) %>% 
+  mutate(doy = yday(date)) %>% 
+  # Julian dates below.
+  summarise(minDateJ = round(quantile(doy, probs = 0.1), 0),
+            maxDateJ = round(quantile(doy, probs = 0.9), 0),
+            medDateJ = round(quantile(doy, probs = 0.5), 0)) %>% 
+  # Calendar dates here. 
+  mutate(minDate = as.Date(minDateJ, paste0(year, "-01-01")),
+         maxDate = as.Date(maxDateJ, paste0(year, "-01-01")),
+         medDate = as.Date(medDateJ, paste0(year, "-01-01")))
+
+
+
+# Predictors second:
 # 1. Snow pack -----------------------------------------------------------------
 
 # Mount Cokely snow pack data
@@ -215,13 +230,6 @@ ggsave("plots/var_TSs.png", units = "px",
 
 # -------------------------------------------------------------------------
 
-
-################################################################################
-
-# Experimentation below.
-# See ggplot programming for some help w/ labelling
-# add expand y and use stat_cor to add reg stats
-
 ExposureIndex <- somassPass %>% 
   mutate(type = "response",
          var  = "Exposure Index") %>% 
@@ -237,7 +245,18 @@ ATUs <- annual[,c(1:2)] %>%
          var  = "Accumulated Thermal Units") %>% 
   rename("val" = "ATUs")
 
-resp.list <- list(ExposureIndex, MaximumTemp, ATUs)
+dateVars <- sproatpass %>%  
+  pivot_longer(cols = c("minDateJ", "medDateJ", "maxDateJ"),
+               names_to = "var", values_to = "val") %>% 
+  mutate(type = "response") %>% 
+  mutate(var = case_when(
+    var == "maxDateJ" ~ "Date of 90% Passage (DOY)",
+    var == "medDateJ" ~ "Date of 50% Passage (DOY)",
+    var == "minDateJ" ~ "Date of 10% Passage (DOY)"
+  )) %>% 
+  split(., .$var)
+
+resp.list <- c(list(ExposureIndex, MaximumTemp, ATUs), dateVars)
 
 library(ggrepel)
 
@@ -246,8 +265,6 @@ multiplot <- function(x) {
  newdf <- merge(x, predvars, by = "year") %>% 
    mutate(yr = substr(year, 3, 4)) 
 
- ceiling <- max(newdf$val.x)
-  
  ggplot(data = newdf, 
         aes(x = val.y,
             y = val.x)) +
@@ -256,32 +273,34 @@ multiplot <- function(x) {
                alpha = 1/6,
                color = "black",
                linetype = "dashed")  +
-   scale_y_continuous(expand = c(0, ceiling*0.08)) +
+   scale_y_continuous(expand = expand_scale(mult = c(1/10, 1/3))) +
    geom_point(size = 2,
               shape = 21,
               colour = "black",
               fill   = "gray50") +
-   facet_wrap(~ var.y, scales = "free_x") +
+   facet_wrap(~ var.y, scales = "free") +
    labs(x = NULL, y = unique(newdf$var.x)) +
    stat_poly_eq(use_label(c("R2", "p")),
                 label.x = "left",
                 label.y = "top",
-                small.p = TRUE)
+                small.p = TRUE) +
+   theme(axis.title.y = element_text(size = 9),
+         strip.background = element_blank())
  
   }
 
 ps <- lapply(resp.list, multiplot)
 
 cowplot::plot_grid(ps[[1]] + theme(strip.background = element_blank()),
-                   ps[[2]] + theme(strip.background = element_blank(),
-                                   strip.text = element_blank()),
-                   ps[[3]] + theme(strip.background = element_blank(),
-                                   strip.text = element_blank()),
-                   ncol = 1,
-                   align = "v")
+                   ps[[2]] + theme(strip.text = element_blank()),
+                   ps[[3]] + theme(strip.text = element_blank()),
+                   ps[[4]] + theme(strip.text = element_blank()),
+                   ps[[5]] + theme(strip.text = element_blank()),
+                   ps[[6]] + theme(strip.text = element_blank()),
+                   ncol = 1, align = "v")
 
 ggsave("plots/var_cors.png", units= "px",
-       width = 2500, height = 2000)
+       width = 2500, height = 3200)
 
 ################################################################################
 
