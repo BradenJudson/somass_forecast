@@ -32,11 +32,11 @@ mytheme <- theme_bw() +
 
 spot <- read.csv("Spot and Mean Daily Water Temp Data At Depth 21.09.21.csv") %>% 
   filter(Location == "Somass River [PaperMill 1990s-2000s]") %>% 
-  dplyr::select(c(5,7, 11)) %>%                       # Remove unnecessary columns.
-  mutate(date = dmy(Date),                            # Reformat date column.
-         doy  = yday(date),                           # Day of the year.
-         week = week(ymd(date))) %>%                  # Week - because data are weekly (roughly).
-  dplyr::select(-Date)                                # Remove original dates.
+  dplyr::select(c(5,7, 11)) %>%           # Remove unnecessary columns.
+  mutate(date = dmy(Date),                # Reformat date column.
+         doy  = yday(date),               # Day of the year.
+         week = week(ymd(date))) %>%      # Week - because data are weekly (roughly).
+  dplyr::select(-Date)                    # Remove original dates.
 
 max(spot$date)
 
@@ -47,13 +47,13 @@ win <- seq(as.Date("2017-01-01"),         # Isolate study window in variable.
 somass <- spot[spot$date %in% win,]       # Subset to above window.
 
 alldates <- as.data.frame(win) %>%       
-  `colnames<-`(., c("date")) %>%                      # Rename column,
-  mutate(week = week(ymd(date)),                      # Reformat dates.
+  `colnames<-`(., c("date")) %>%            # Rename column,
+  mutate(week = week(ymd(date)),            # Reformat dates.
          Year = year(date)) %>% 
   merge(., somass, 
-        by    = c("date", "week", "Year"),            # Re-add spot check temp data.
-        all.x = TRUE) %>%                             # Even missing data.
-  filter(date %in% win)                               # Subset.
+        by    = c("date", "week", "Year"),  # Re-add spot check temp data.
+        all.x = TRUE) %>%                   # Even missing data.
+  filter(date %in% win)                     # Subset.
 
 weekly <- alldates %>%                          
   group_by(Year, week) %>%                  # For each year and week... 
@@ -98,11 +98,12 @@ impDF <- data.frame(wSom = as.numeric(weekimp),
 STS <- ts(as.numeric(impDF$wSom), # Set Somass temperatures as a time series object.
           frequency = 365.25/7)         # Weekly averages with annual seasonality.
 
-# test <- as_tsibble(STS)
 ns <- decompose(STS); plot(ns)    # View decomposition of time series data.
 plot(ns$seasonal)                 # Clearly strong seasonal component.
 
+# Check frequency of time series computationally.
 (ffreq <- forecast::findfrequency(STS))
+# Aligns well with expected periodicity. 
 all.equal(ffreq, 52)
 
 # Seasonality ------------------------------------------------------------------
@@ -113,7 +114,7 @@ fh <- 4
 # Set up list to store output values.
 bestfit <- list(aicc = Inf) 
 
-for(i in 1:25) {                        # For fourier terms 1 - 50.
+for(i in 1:25) {                        # For fourier terms 1 - 25.
   fit <- auto.arima(STS,                # Conduct automatic ARIMA models.
                     xreg = fourier(STS, K = i), # Use Fourier on timeseries data with varying number of terms.
                     seasonal = FALSE)   # Fourier to encompass seasonality so exclude from base model.
@@ -338,6 +339,8 @@ flows <- merge(ashFlow, sproatFlow, by = "date") %>%
   pivot_longer(cols = c("rash", "rsproat")) %>% 
   mutate(name = tools::toTitleCase(sub('.', '', name)))
 
+(flowcor <- lm(data = flows, rash ~ rsproat)); summary(flowcor)
+
 (flowTS <- ggplot(data = flows, aes(x = date, y = value, colour = name)) +
     geom_line(size = 1) + mytheme +
     labs(x = NULL, y = "Discharge (cms)") +
@@ -419,17 +422,17 @@ armLF <- arimaDF %>%
   mutate(MAE = abs(obs - value))
 
 ###############################################
-#### LEFT OFF HERE SEPT 20, 5pm
-# calculate MAE by hand by group
-# set up function, can do MAE, MAPE, etc.
-
-armLF %>% 
-  group_by(h) %>% 
-  mutate(error = abs(obs - value)) %>% 
-  summarise(MAE  = mean(error),
-            RMSE = sqrt(mean(error^2)),
-            MAPE = 100*mean(error/obs)) %>% 
-  
+# #### LEFT OFF HERE SEPT 20, 5pm
+# # calculate MAE by hand by group
+# # set up function, can do MAE, MAPE, etc.
+# 
+# armLF %>% 
+#   group_by(h) %>% 
+#   mutate(error = abs(obs - value)) %>% 
+#   summarise(MAE  = mean(error),
+#             RMSE = sqrt(mean(error^2)),
+#             MAPE = 100*mean(error/obs)) %>% 
+#   
 ################################################
 
 ggplot(data = armLF, 
@@ -502,7 +505,7 @@ plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAPE", type = "b")
 # Prediction intervals at thresholds -------------------------------------------
 
 
-nsim <- 1000L # 10k simulations. 
+nsim <- 1000L # 1k simulations. 
 fh            # = 4 weeks. Defined earlier.
 
 # Empty matrix to populate w/ for-loop.
@@ -513,9 +516,9 @@ for(i in seq(nsim)) {
 
   # Simulate the best-performing model. 
   future[,i] <- simulate(Arima(y = as.numeric(STS),
-                               order = order,
+                               order    = order,
                                seasonal = FALSE,
-                               xreg = harmonics),
+                               xreg     = harmonics),
                          # 4 weeks of forecasted harmonics (~ newxreg).
                          xreg   = fourier(STS,
                                           K = bf,
@@ -559,7 +562,7 @@ ggsave("plots/simulated_tempdists.png", units = "px",
             p20  = round(sum(temp > 20, na.rm = TRUE)/nsim * 100, 1)) %>% 
   mutate(date = max(impDF$date) + seq(7, 7*fh, 7)))
 
-
+# Plot forecasts and time series together.
 (forecast_probs <- ggplot(data = impDF,
        aes(x = date,
            y = wSom)) +
@@ -619,7 +622,7 @@ tempPlot <- function(df, pred) {
   # predictor variable is adjustable. 
   ggplot(data = df, aes(x = {{ pred }}, y = wSom)) +
     # Jitter helps visualization. 
-    geom_smooth(method = "lm", alpha = 1/4, linetype = 2) +
+    geom_smooth(alpha = 1/4, linetype = 2) +
     geom_jitter(size = 2, alpha = 1/2,
                 width = 2, height = 1) + mytheme +
     labs(y = "Somass temperature (°C)")
@@ -628,11 +631,11 @@ tempPlot <- function(df, pred) {
 # Apply function to both variables of interest.
 # Use cowplot to arrange into a single figure and save.
 # Adjust x-axis label at this stage.
-cplot <- cowplot::plot_grid(tempPlot(df = all.vars, pred = value) + 
+(cplot <- cowplot::plot_grid(tempPlot(df = all.vars, pred = value) + 
                    xlab("Sproat River flow (cms)"),
          tempPlot(df = all.vars, pred = mAirT) + 
          xlab("Port Alberni air temperature (°C)"),
-         align = "v", ncol = 1)
+         align = "v", ncol = 1))
 
 
 ggsave("plots/temp_relationships.png", units = "px",
@@ -660,10 +663,24 @@ for (i in 1:5) {
 # Coerce all of the model outputs into a single dataframe. 
 polyMods <- do.call(rbind, fitlist) %>% 
   # Relative AIC values, rounded.
-  mutate(deltaAIC = round(AIC - min(AIC), 3)) %>% 
-  relocate(call, AIC, deltaAIC) %>% 
+  mutate(deltaAIC = round(AIC - min(AIC), 3),
+         model = seq(1, nrow(.), 1),
+         ic = AIC + BIC) %>% 
+  relocate(model, call, AIC, deltaAIC) %>% 
   # Put lowest relative AIC values at the top.
-  arrange(deltaAIC)
+  arrange(deltaAIC) 
+
+# Write above table as csv.
+write.csv(polyMods[,-ncol(polyMods)],
+          "polynomial_mods.csv", 
+          row.names = FALSE)
+
+# Visualize model performance wrt AIC and BIC.
+# Looks like 13, 18, 15, 20, 25, and 14 perform well.
+ggplot(data = polyMods, 
+       aes(x = BIC, y = AIC,
+           label = model)) + 
+  ggrepel::geom_label_repel() + mytheme
 
 # Isolate call for the model with the lowest relative AIC.
 (optCall <- as.character(polyMods[which.min(polyMods$deltaAIC), 1]))
@@ -673,6 +690,7 @@ polyMods <- do.call(rbind, fitlist) %>%
 (optk <- as.numeric(substr(optCall, 48, 48)))
 # Input into model. 
 (optReg <- lm(data = all.vars, formula = wSom ~ poly(value, opti) + poly(mAirT, optk) + year))
+summary(optReg)
 # Visualize residuals and test for normality. 
 hist(optReg$residuals, main = NULL, xlab = "Residuals"); shapiro.test(optReg$residuals)
 
@@ -710,6 +728,7 @@ ggsave("plots/lm_fitted_observed.png", units = "px",
 # combine them and get an improved prediction using an average of historical patterns
 # and anticipated environmental conditions? 
 # maybe: https://stats.stackexchange.com/questions/560184/how-to-average-several-posteriors-distributions-from-a-monte-carlo-simulation
+# https://stackoverflow.com/questions/14967813/is-there-a-function-or-package-which-will-simulate-predictions-for-an-object-ret
 # Also look into distribution convolution.
 # https://stackoverflow.com/questions/23569133/adding-two-random-variables-via-convolution-in-r
 # https://www.countbayesie.com/blog/2022/11/30/understanding-convolutions-in-probability-a-mad-science-perspective
