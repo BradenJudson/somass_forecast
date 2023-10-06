@@ -134,6 +134,9 @@ harmonics <- fourier(STS,            # Fit optimal Fourier model to observed dat
                      K = bf)         # Using lowest AIC selection.
 nrow(harmonics) == length(STS)       # Both 249 rows.
 
+# Test for stationarity. 
+Box.test(bestfit$residuals, type = "Ljung-Box")
+
 # Air temperature data ---------------------------------------------------------
 
 # Read in daily air temperature data.
@@ -253,8 +256,8 @@ ggsave("plots/temp_dists.png", units = "px",
 # Assessing various model fits.
 #First, non-lagged models. 
 summary(fit) # Non-lagged model identified above.
-(fit2 <- lm(data = dat, wSom ~ poly(rAir, 2, raw = TRUE))); summary(fit2)
-(fit3 <- lm(data = dat, wSom ~ poly(rAir, 3, raw = TRUE))); summary(fit3)
+(fit2 <- lm(data = dat, wSom ~ poly(rAir, 2, raw = TRUE) + year)); summary(fit2)
+(fit3 <- lm(data = dat, wSom ~ poly(rAir, 3, raw = TRUE) + year)); summary(fit3)
 
 
 # Lagged models here.
@@ -329,17 +332,29 @@ sproat <- hy_daily_flows(station_number = "08HB008",
   dplyr::select(c("Date", "rSproat", "year")) %>%
   `colnames<-`(., tolower(c(colnames(.)))) 
 
+summary(sproat$rsproat); summary(ash$rash)
+t.test(sproat$rsproat, ash$rash, paired = TRUE)
+
+# "remove" anomalously high flooding events. 
+# Make downstream analysis challenging and don't reflect typical hydrology.
+hist(sproat$rsproat)
+(spq <- quantile(sproat$rsproat, probs = c(0.90, 0.95, 0.99))); spq[[1]]
+sproat$rsproat[sproat$rsproat > spq[[1]]] <- spq[[1]]
+hist((sproat$rsproat))
+
 # Isolate Sproat flows. 
 sproatFlow <- sproat[sproat$date %in% impDF$date, c("date", "rsproat")]
  
 # Make sure all dates are accounted for. 
 nrow(ashFlow) == nrow(sproatFlow) & nrow(impDF)
 
+
+
 flows <- merge(ashFlow, sproatFlow, by = "date") %>% 
   pivot_longer(cols = c("rash", "rsproat")) %>% 
   mutate(name = tools::toTitleCase(sub('.', '', name)))
 
-(flowcor <- lm(data = flows, rash ~ rsproat)); summary(flowcor)
+# (flowcor <- lm(data = flows, rash ~ rsproat)); summary(flowcor)
 
 (flowTS <- ggplot(data = flows, aes(x = date, y = value, colour = name)) +
     geom_line(size = 1) + mytheme +
@@ -384,7 +399,7 @@ xregs <- list(air = airvars[,2:4],
               ash = ashFlow[,2],   
               harmonics = NULL,
               bothFlow = cbind(sproatFlow[,2], ashFlow[,2]),
-              airFlow = cbind(airvars[,2:4], ashFlow[,2], sproatFlow[,2]))
+              airFlow = cbind(airvars[,2:4],   ashFlow[,2], sproatFlow[,2]))
 
 # Apply to all list elements simultaneously. 
 (xreg_mods <- lapply(xregs, arm.xreg))
@@ -398,7 +413,9 @@ xregs <- list(air = airvars[,2:4],
     relocate("xreg", "AIC", "deltaAIC") %>% 
     # Present lowest relative AIC first.
     arrange(deltaAIC) %>% 
-    `rownames<-`(., c(seq(1, nrow(.), 1)))) 
+    `rownames<-`(., c(seq(1, nrow(.), 1))))
+
+write.csv(mod_vals, "arima_models.csv", row.names = F)
 
 # Isolate the model with lowest relative AIC.
 (optMod <- xreg_mods[[mod_vals[mod_vals$deltaAIC == 0, 1]]])
@@ -415,49 +432,34 @@ arimaDF <- data.frame(obs  = impDF$wSom,
          MAE2  = abs(obs - h2)) %>% 
   filter(month %in% c(4:9)) 
 
-
+# Convert to LF for plotting purposes.
 armLF <- arimaDF %>% 
   pivot_longer(cols = starts_with("h"), 
                names_to = "h") %>% 
-  mutate(MAE = abs(obs - value))
+  mutate(MAE = abs(obs - value),
+         fh  = case_when(h == "h1" ~ "FH = 1 week",
+                         h == "h2" ~ "FH = 2 weeks",
+                         h == "h3" ~ "FH = 3 weeks",
+                         h == "h4" ~ "FH = 4 weeks"),
+         year = as.factor(year))
 
-###############################################
-# #### LEFT OFF HERE SEPT 20, 5pm
-# # calculate MAE by hand by group
-# # set up function, can do MAE, MAPE, etc.
-# 
-# armLF %>% 
-#   group_by(h) %>% 
-#   mutate(error = abs(obs - value)) %>% 
-#   summarise(MAE  = mean(error),
-#             RMSE = sqrt(mean(error^2)),
-#             MAPE = 100*mean(error/obs)) %>% 
-#   
-################################################
+library(ggh4x)
 
 ggplot(data = armLF, 
        aes(x = date, y = obs)) +
   mytheme +
-  geom_line(aes(x = date, y = value, colour = h),
-            size = 2/3, alpha = 1, linetype=  1) +
-  geom_point(size = 2, alpha = 1/8) +
-  facet_wrap(~year, scales = "free_x") +
+  geom_line(aes(x = date, y = value, colour = year),
+            size = 1, alpha = 2/3, linetype=  1) +
+  geom_point(size = 1.5, alpha = 2/8) +
+  facet_grid2(c("fh", "year"),
+              scales = "free_x", independent = "x") +
   labs(x = NULL, y = "Somass temperature (°C)") +
-  scale_x_date(date_breaks = "1 month",
-               date_labels = "%b")
+  scale_x_date(date_breaks = "2 month",
+               date_labels = "%b") +
+  theme(legend.position = "none")
 
-ggplot(data = arimaDF) +
-  geom_point(aes(x = date, y = obs), color = "red") +
-  geom_line(aes(x = date, y = h2),   color = "blue", alpha = 1/3) +
-  geom_point(aes(x = date, y = h2),  color = "blue", alpha = 1/3) +
-  facet_wrap(~year, scales=  "free_x") + mytheme +
-  labs(x = NULL, y = "Somass temperature (°C)") +
-  ggtitle("Blue = modelled (h = 2), Red = Observed") +
-  scale_x_date(date_breaks = "1 month",
-               date_labels = "%b")
-
-ggsave("plots/test_validationh2.png", units = "px",
-       width = 2500, height = 1500)
+ggsave("plots/arima_acc.png", units = "px",
+       width = 2500, height = 2000)
 
 
 #Performance -------------------------------------------------------------------
@@ -486,21 +488,74 @@ forcv <- tsCV(as.numeric(STS), fc,
                                   airvars[,c(2:4)])))
 head(forcv,  15) # Check formatting.
 
-# For formatting subsequent base plots.
-par(mfrow = c(3,1), mar = c(5,5,1,1))
+# Meteorological season definitions. 
+seasons <- airvars %>% 
+  rownames_to_column(var = "index") %>% 
+  mutate(q = lubridate::quarter(date, fiscal_start = 12))
 
-# Calculate RMSE for h = 1:6 and plot.
-(cv_rmse <- apply(forcv, 2, FUN = function(x) sqrt(mean(x^2, na.rm = TRUE)))) 
-plot(cv_rmse, xlab = "Forecast horizon (weeks)", ylab = "RMSE", type = "b")
+# Isolate each season as an indexed variable.
+wint <- as.numeric(as.vector(seasons[seasons$q == 1, "index"]))
+spri <- as.numeric(as.vector(seasons[seasons$q == 2, "index"]))
+summ <- as.numeric(as.vector(seasons[seasons$q == 3, "index"]))
+fall <- as.numeric(as.vector(seasons[seasons$q == 4, "index"]))
 
-# Calculate absolute error for  h = 1:6 and plot.
-(cv_ae <- apply(forcv, 2, FUN = function(x) mean(abs(x), na.rm = TRUE)))
-plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAE", type = "b")
+slist <- list(wint, spri, summ, fall)
 
-# Calculate mean absolute percent error for  h = 1:6 and plot.
-(cv_ae <- apply(forcv, 2, FUN = function(x) 100*mean(abs(x)/STS, na.rm = TRUE)))
-plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAPE", type = "b")
 
+# # For formatting subsequent base plots.
+# par(mfrow = c(3,1), mar = c(5,5,1,1))
+# 
+# # Calculate RMSE for h = 1:4 and plot.
+# (cv_rmse <- apply(forcv, 2, FUN = function(x) sqrt(mean(x^2, na.rm = TRUE)))) 
+# plot(cv_rmse, xlab = "Forecast horizon (weeks)", ylab = "RMSE", type = "b")
+# 
+# # Calculate absolute error for  h = 1:4 and plot.
+# (cv_ae <- apply(forcv, 2, FUN = function(x) mean(abs(x), na.rm = TRUE)))
+# plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAE", type = "b")
+# 
+# # Calculate mean absolute percent error for  h = 1:4 and plot.
+# (cv_ma <- apply(forcv, 2, FUN = function(x) 100*mean(abs(x)/STS, na.rm = TRUE)))
+# plot(cv_ae, xlab = "Forecast horizon (weeks)", ylab = "MAPE", type = "b")
+
+
+# Make an empty list.
+# For each season, calculate cross-validation statistics. 
+fl <- list()
+for (i in 1:4) {
+  
+  # Populate list.
+  season_sub <- slist[[i]]
+  
+  # Root mean square error, absolute error and mean absolute percent error.
+  (cv_rmse <- apply(forcv[season_sub,], 2, FUN = function(x) sqrt(mean(x^2, na.rm = TRUE)))) 
+  (cv_ae   <- apply(forcv[season_sub,], 2, FUN = function(x) mean(abs(x), na.rm = TRUE)))
+  (cv_ma   <- apply(forcv[season_sub,], 2, FUN = function(x) 100*mean(abs(x)/STS, na.rm = TRUE)))
+  
+  # Bind into a dataframe 
+  tb <- as.data.frame(rbind(cv_rmse, cv_ae, cv_ma)) %>% 
+    rownames_to_column("metric") %>% 
+    mutate_if(is.numeric, round, 3)
+  
+  # Add a factor for which season stats are for.
+  tb$sind <- i
+  tb$season <- case_when(i == 1 ~ "Winter",
+                         i == 2 ~ "Spring",
+                         i == 3 ~ "Summer",
+                         i == 4 ~ "Fall")
+  
+  # Reformat dataframe.
+  fl[[i]] <- tb[-6] %>% 
+    pivot_longer(cols = c("h=1", "h=2", "h=3", "h=4"),
+                 names_to = "Horizon") %>% 
+    pivot_wider(values_from = value, names_from = metric)
+  
+}
+
+# Read everything together and write to directory.
+(fpl <- do.call(rbind, fl)); write.csv(fpl, "cross_val_seas.csv")
+
+summary(aov(cv_ma ~ season, data = fpl))
+summary(aov(cv_ma ~ Horizon, data = fpl))
 
 # Prediction intervals at thresholds -------------------------------------------
 
@@ -527,7 +582,7 @@ for(i in seq(nsim)) {
                          future = TRUE,
                          bootstrap = TRUE)
   
-  # Print progress bar for each iteration. 
+  # Print progress bar for each iteration. Takes a bit.
   progress(i, nsim) 
 }
 
@@ -541,6 +596,7 @@ for(i in seq(nsim)) {
                values_to = "temp") %>% 
   mutate(d = as.Date(max(impDF$date) + 7*as.numeric(substr(x = h, 1, 1)))))
   
+# Visualize simulations as histograms.
 (simhist <- ggplot(data = future_sims, aes(x = temp)) +
   geom_histogram(fill  = "gray95",
                  color = "gray30",
@@ -617,41 +673,65 @@ all.vars <- merge(impDF, airtemp) %>%
   merge(., flows[flows$name == "Sproat",]) %>% 
   mutate(month = month(date))
 
-# Function for visualizing relationships. 
-tempPlot <- function(df, pred) {
-  # predictor variable is adjustable. 
-  ggplot(data = df, aes(x = {{ pred }}, y = wSom)) +
-    # Jitter helps visualization. 
-    geom_smooth(alpha = 1/4, linetype = 2) +
-    geom_jitter(size = 2, alpha = 1/2,
-                width = 2, height = 1) + mytheme +
-    labs(y = "Somass temperature (°C)")
-}
+fit_flow  <- (lm(wSom ~ sqrt(value) + year, all.vars))
+fit_flow2 <- (lm(wSom ~ poly(value, 2) + year, all.vars))
+fit_flow3 <- (lm(wSom ~ poly(value, 3) + year, all.vars))
+anova(fit_flow, fit_flow2, fit_flow3)
+AIC(fit_flow, fit_flow2, fit_flow3)
+
+
+# # Function for visualizing relationships. 
+# tempPlot <- function(df, pred) {
+#   # predictor variable is adjustable. 
+#   ggplot(data = df, aes(x = {{ pred }}, y = wSom)) +
+#     # Jitter helps visualization. 
+#     geom_smooth(alpha = 1/4, linetype = 2,
+#                 method = "lm",
+#                 formula = y ~ poly(x, 3)) +
+#     geom_jitter(size = 2, alpha = 1/2,
+#                 width = 2, height = 1) + mytheme +
+#     labs(y = "Somass temperature (°C)") +
+#     scale_y_continuous(expand = expand_scale(mult = c(1/10, 1/5))) +
+#     ggpmisc::stat_poly_eq(use_label(c("R2", "p", "eq")),
+#                           formula = y ~ poly(x, 3),
+#                           label.x = "middle",
+#                           label.y = "top",
+#                           small.p = "TRUE")
+# }
 
 # Apply function to both variables of interest.
 # Use cowplot to arrange into a single figure and save.
 # Adjust x-axis label at this stage.
-(cplot <- cowplot::plot_grid(tempPlot(df = all.vars, pred = value) + 
-                   xlab("Sproat River flow (cms)"),
-         tempPlot(df = all.vars, pred = mAirT) + 
-         xlab("Port Alberni air temperature (°C)"),
-         align = "v", ncol = 1))
+# (cplot <- cowplot::plot_grid(tempPlot(df = all.vars, 
+#                                       pred = value) + 
+#                    xlab("Sproat River flow (cms)"),
+#          tempPlot(df = all.vars, pred = mAirT) + 
+#          xlab("Port Alberni air temperature (°C)"),
+#          align = "v", ncol = 1))
 
 
-ggsave("plots/temp_relationships.png", units = "px",
+# Fit a few combinations of predictors.
+fit_flow <- (lm(wSom ~ value, all.vars))
+fit_air  <- (lm(wSom ~ mAirT, all.vars))
+fit_both <- (lm(wSom ~ mAirT + value, all.vars))
+# Using both air temp and flow is a significant improvement.
+anova(fit_flow, fit_air, fit_both)
+
+
+ggsave("plots/temp_relationships_cu.png", units = "px",
        width = 2000, height = 2000)
 
-# Set up blank list.
-fitlist <- list(); n <- 1
+# Set up blank lists.
+fitlist <- modlist <- list(); n <- 1
 
 # Perform linear model with polynomials of flow and air temp.
 # For orders 1 - 5 for both variables and all combinations. 
-for (i in 1:5) {
-  for (k in 1:5) {
+for (i in 1:3) {
+  for (k in 1:3) {
     # Set up generalized polynomial model form. 
-    model <- lm(wSom ~ poly(value, i) + poly(mAirT, k) + year, data = all.vars)
+    modlist[[n]] <- lm(wSom ~  poly(mAirT, k) + year, data = all.vars)
     # Assign to position in the list using broom to tidy outputs.
-    fitlist[[n]] <- broom::glance(model) %>% 
+    fitlist[[n]] <- broom::glance(modlist[[n]]) %>% 
       # Create column for expression.
       mutate(call = paste0("Somass ~ poly(Sproat Flow, ", i, 
                            ") + poly(Air Temp, ", k, ")"))
@@ -675,24 +755,18 @@ write.csv(polyMods[,-ncol(polyMods)],
           "polynomial_mods.csv", 
           row.names = FALSE)
 
-# Visualize model performance wrt AIC and BIC.
-# Looks like 13, 18, 15, 20, 25, and 14 perform well.
-ggplot(data = polyMods, 
-       aes(x = BIC, y = AIC,
-           label = model)) + 
-  ggrepel::geom_label_repel() + mytheme
-
 # Isolate call for the model with the lowest relative AIC.
-(optCall <- as.character(polyMods[which.min(polyMods$deltaAIC), 1]))
+(optCall <- as.character(polyMods[which.min(polyMods$deltaAIC), 2]))
 # Optimal polynomial order for flow.
 (opti <- as.numeric(substr(optCall, 28, 28)))
 # Optimal polynomial order for air temperature.
 (optk <- as.numeric(substr(optCall, 48, 48)))
 # Input into model. 
-(optReg <- lm(data = all.vars, formula = wSom ~ poly(value, opti) + poly(mAirT, optk) + year))
+(optReg <- lm(data = all.vars, formula = wSom ~ poly(log(value), 2) + poly(mAirT, 3) + year))
 summary(optReg)
 # Visualize residuals and test for normality. 
 hist(optReg$residuals, main = NULL, xlab = "Residuals"); shapiro.test(optReg$residuals)
+shapiro.test(optReg$residuals)
 
 # Add fitted values to original dataframe for comparison.
 all.vars$fitted <- optReg$fitted.values
@@ -717,6 +791,23 @@ ggplot(data = all.vars %>%
 
 ggsave("plots/lm_fitted_observed.png", units = "px",
        width = 2500, height = 1800)
+
+# Fitted vs. observed values.
+(fitpr <- ggplot(data = all.vars, aes(x = fitted, y = wSom)) +
+  geom_smooth(method = "lm", colour = "black") +
+  geom_point(size = 3/2,  shape = 21, stroke = 1/2,
+             fill = "gray90", colour = "black") + mytheme +
+    labs(x = "Fitted temperature values (°C)",
+         y = "Observed temperature values (°C)"))
+
+# Residuals.
+(resid <- ggplot() + geom_histogram(aes(optReg$residuals),
+          fill = "grey90", color = "black") +
+    mytheme + labs(x = "Residuals", y = "Frequency"))
+
+# Combined diagnostics plot and save.
+(lm.diag <- cowplot::plot_grid(fitpr, resid, align = "vh", ncol = 1))
+ggsave("plots/lm_diagnostics.png", width = 2000, height = 2000, units = "px")
   
 (lm.err <- all.vars %>% 
   mutate(error = abs(fitted - wSom)) %>% 
@@ -724,14 +815,6 @@ ggsave("plots/lm_fitted_observed.png", units = "px",
             abse = mean(error),
             mape = 100*mean(error/wSom)))
 
-# Idea: Can I simulate predictions from LM above AND from the ARIMA model
-# combine them and get an improved prediction using an average of historical patterns
-# and anticipated environmental conditions? 
-# maybe: https://stats.stackexchange.com/questions/560184/how-to-average-several-posteriors-distributions-from-a-monte-carlo-simulation
-# https://stackoverflow.com/questions/14967813/is-there-a-function-or-package-which-will-simulate-predictions-for-an-object-ret
-# Also look into distribution convolution.
-# https://stackoverflow.com/questions/23569133/adding-two-random-variables-via-convolution-in-r
-# https://www.countbayesie.com/blog/2022/11/30/understanding-convolutions-in-probability-a-mad-science-perspective
 
 ################################################################################
 ################################################################################

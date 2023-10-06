@@ -137,6 +137,37 @@ sproatpass <- pass[pass$river == "Sproat River", ] %>%
          medDate = as.Date(medDateJ, paste0(year, "-01-01")))
 
 
+(minP <- ggplot(data = sproatpass, aes(x = year, y = minDateJ)) +
+  geom_line(size = 3/4, alpha = 1/3) +
+  geom_point(size = 3, shape = 21,
+             color = "white",
+             fill = "black") +
+  mytheme +
+  labs(x = NULL, y = "Day of 10% Passage") +
+  scale_x_continuous(breaks = seq(2000, 2025, 2)))
+
+(medP <- ggplot(data = sproatpass, aes(x = year, y = medDateJ)) +
+    geom_line(size = 3/4, alpha = 1/3) +
+    geom_point(size = 3, shape = 21,
+               color = "white",
+               fill = "black") +
+    mytheme +
+    labs(x = NULL, y = "Day of 50% Passage") +
+    scale_x_continuous(breaks = seq(2000, 2025, 2)) +
+    scale_y_continuous(breaks = seq(190, 250, 5)))
+
+(maxP <- ggplot(data = sproatpass, aes(x = year, y = maxDateJ)) +
+    geom_line(size = 3/4, alpha = 1/3) +
+    geom_point(size = 3, shape = 21,
+               color = "white",
+               fill = "black") +
+    mytheme +
+    labs(x = NULL, y = "Day of 90% Passage") +
+    scale_x_continuous(breaks = seq(2000, 2025, 2)) +
+    scale_y_continuous(breaks = seq(290, 320, 2)))
+
+
+
 
 # Predictors second:
 # 1. Snow pack -----------------------------------------------------------------
@@ -221,12 +252,21 @@ pni <- read.csv("PNW_aPNI.csv",
 
 # -------------------------------------------------------------------------
 
-(preds <- cowplot::plot_grid(snow.plot, pni.plot, anom.plot, ncol = 1, align = "v"))
-(resps <- cowplot::plot_grid(atu.plot, exp.plot, temp, ncol = 1, align = "v"))
-(comb <- cowplot::plot_grid(preds, resps, ncol = 2))
+(preds <- cowplot::plot_grid(snow.plot, pni.plot, anom.plot, 
+                             ncol = 1, align = "v",
+                             labels = c("A", "B", "C"), 
+                             label_x = 0.92))
+ggsave("plots/preds_TS.png", units = "px",
+       width = 2000, height = 2000)
 
-ggsave("plots/var_TSs.png", units = "px",
-       width = 3000, height = 2000)
+(resps <- cowplot::plot_grid(atu.plot, exp.plot, temp, 
+                             minP, medP, maxP,
+                             ncol = 1, align = "v",
+                             labels = c("A", "B", "C","D", "E", "F"),
+                             label_x = 0.08))
+
+ggsave("plots/resp_TSs.png", units = "px",
+       width = 2000, height = 3200)
 
 # -------------------------------------------------------------------------
 
