@@ -58,6 +58,7 @@ maxT <- som %>%
   group_by(year) %>% 
   summarise(maxT = max(wSom, na.rm = TRUE))
 
+
 (temp <- ggplot(data = maxT, 
                 aes(x = year,
                     y = maxT)) + 
@@ -66,7 +67,7 @@ maxT <- som %>%
                color = "white",
                fill = "black") +
     mytheme +
-    labs(x = NULL, y= "Maximum temperature (C)") +
+    labs(x = NULL, y= "Maximum temperature (°C)") +
     scale_x_continuous(breaks = seq(2000, 2025, 2)))
 
 
@@ -118,7 +119,7 @@ somassPass <- pass %>%
                color = "white",
                fill = "black") +
     mytheme +
-    labs(x = NULL, y = "Exposure Index") +
+    labs(x = NULL, y = "Exposure Index (°C)") +
     scale_x_continuous(breaks = seq(2000, 2025, 2)))
 
 
@@ -144,7 +145,8 @@ sproatpass <- pass[pass$river == "Sproat River", ] %>%
              fill = "black") +
   mytheme +
   labs(x = NULL, y = "Day of 10% Passage") +
-  scale_x_continuous(breaks = seq(2000, 2025, 2)))
+  scale_x_continuous(breaks = seq(2000, 2025, 2)) +
+    scale_y_continuous(expand = c(0,15)))
 
 (medP <- ggplot(data = sproatpass, aes(x = year, y = medDateJ)) +
     geom_line(size = 3/4, alpha = 1/3) +
@@ -154,7 +156,8 @@ sproatpass <- pass[pass$river == "Sproat River", ] %>%
     mytheme +
     labs(x = NULL, y = "Day of 50% Passage") +
     scale_x_continuous(breaks = seq(2000, 2025, 2)) +
-    scale_y_continuous(breaks = seq(190, 250, 5)))
+    scale_y_continuous(breaks = seq(190, 250, 5),
+                       expand = c(0,5)))
 
 (maxP <- ggplot(data = sproatpass, aes(x = year, y = maxDateJ)) +
     geom_line(size = 3/4, alpha = 1/3) +
@@ -203,7 +206,7 @@ snow <- read.csv("DataSetExport-SD.Field Visits@3B02A-20230825160412.csv",
   geom_point(size  = 3, colour = "white",
              shape = 21, fill  = "black") + 
   mytheme +
-  scale_x_continuous(breaks = seq(1900, 2100, 3)) +
+  scale_x_continuous(breaks = seq(200, 2100, 3)) +
   scale_y_continuous(breaks = seq(0, 500, 100)) +
   labs(x = NULL, y = "Mount Cokely snow pack (cm)"))
 
@@ -228,7 +231,7 @@ noaa <- read_table(file = "cpc.ncep.noaa.gov_data_indices_oni.ascii.txt") %>%
     geom_point(size = 3, shape = 21, 
                color = "white", fill = "black") +
     mytheme + labs(x = NULL, y = 'SST Anomaly Index') +
-    scale_x_continuous(breaks = seq(200, 2022, 2)))
+    scale_x_continuous(breaks = seq(200, 2022, 3)))
 
 
 # PNI ---------------------------------------------------------------------
@@ -246,7 +249,7 @@ pni <- read.csv("PNW_aPNI.csv",
     geom_point(size = 3, shape = 21, 
                color = "white", fill = "black") +
     mytheme + labs(x = NULL, y = 'PNI') +
-    scale_x_continuous(breaks = seq(200, 2022, 2)))
+    scale_x_continuous(breaks = seq(200, 2022, 3)))
 
 
 
@@ -254,19 +257,63 @@ pni <- read.csv("PNW_aPNI.csv",
 
 (preds <- cowplot::plot_grid(snow.plot, pni.plot, anom.plot, 
                              ncol = 1, align = "v",
-                             labels = c("A", "B", "C"), 
-                             label_x = 0.92))
+                             labels = c("1a", "2a", "3a"), 
+                             label_x = 0.12))
+
+(snowpack <- ggplot()+geom_density(data = snow, aes(mSnow)) +
+    labs(x = NULL, y = NULL) + mytheme +
+    scale_y_continuous(labels = function(x) sprintf("%.3f", x)))
+(pniden <- ggplot()+geom_density(data = pni, aes(aPNI)) +
+    labs(x = NULL, y = NULL) + mytheme +
+    scale_y_continuous(labels = function(x) sprintf("%.3f", x)))
+(anomDen <- ggplot()+geom_density(data = noaa, aes(anomM)) +
+    labs(x = NULL, y = NULL) + mytheme +
+    scale_y_continuous(labels = function(x) sprintf("%.3f", x)))
+
+(predDens <- cowplot::plot_grid(snowpack, pniden, anomDen, ncol = 1, align=  "v",
+                                labels = c("1b", "2b", "3b"),
+                                label_x = 0.165))
+
+cowplot::plot_grid(preds, predDens, ncol = 2, rel_widths = c(5,3))
+
+
 ggsave("plots/preds_TS.png", units = "px",
        width = 2000, height = 2000)
 
-(resps <- cowplot::plot_grid(atu.plot, exp.plot, temp, 
+(respTS <- cowplot::plot_grid(atu.plot, exp.plot, temp, 
                              minP, medP, maxP,
                              ncol = 1, align = "v",
-                             labels = c("A", "B", "C","D", "E", "F"),
+                             labels = c("1a", "2a", "3a","4a", "5a", "6a"),
                              label_x = 0.08))
 
-ggsave("plots/resp_TSs.png", units = "px",
-       width = 2000, height = 3200)
+(maxHis <- ggplot()+geom_density(data = maxT, aes(maxT)) +
+    labs(x = NULL, y = NULL) + mytheme +
+    scale_y_continuous(labels = function(x) sprintf("%.3f", x)))
+(ATUHis <- ggplot()+geom_density(data = annual, aes(ATUs)) +
+    labs(x = NULL, y = NULL) + mytheme +
+    scale_y_continuous(labels = function(x) sprintf("%.3f", x)))
+(expHis <- ggplot()+geom_density(data = somassPass, aes(expInd)) +
+    labs(x = NULL, y = NULL) + mytheme +
+    scale_y_continuous(labels = function(x) sprintf("%.3f", x)))
+(minD <- ggplot()+geom_density(data = sproatpass, aes(minDateJ)) +
+    labs(x = NULL, y = NULL) + mytheme +
+    scale_y_continuous(labels = function(x) sprintf("%.3f", x)))
+(medD <- ggplot()+geom_density(data = sproatpass, aes(medDateJ)) +
+    labs(x = NULL, y = NULL) + mytheme +
+    scale_y_continuous(labels = function(x) sprintf("%.3f", x)))
+(maxD <- ggplot()+geom_density(data = sproatpass, aes(maxDateJ)) +
+    labs(x = NULL, y = NULL) + mytheme +
+    scale_y_continuous(labels = function(x) sprintf("%.3f", x)))
+
+(respD <- cowplot::plot_grid(ATUHis, expHis, maxHis,
+                             minD, medD, maxD,
+  ncol = 1, align = "v", label_x = 0.14,
+  labels = c("1b", "2b", "3b", "4b", "5b", "6b")))
+
+(f <- cowplot::plot_grid(respTS, respD, ncol = 2, rel_widths = c(5,2)))
+
+ggsave("plots/conditions.png", units= "px", width = 2500, height = 3000)
+
 
 # -------------------------------------------------------------------------
 
@@ -344,6 +391,32 @@ ggsave("plots/var_cors.png", units= "px",
 
 ################################################################################
 
+library(GGally)
 
 
+rcond <- responsevars[,c(1,2,6,10)] %>% 
+  `colnames<-`(., c("Year", "Exposure index", "Maximum temperature", "Accumulated thermal units"))
 
+rconds12 <- rcond[rcond$Year != "2012", ]
+
+ggpairs(data = rcond[,-1],
+        upper = list(continuous = wrap("cor", 
+                     method = "spearman")),
+        lower = list(continuous = wrap("points", 
+                     size = 2.5, alpha = 1/3))) +
+  mytheme; ggsave("plots/cond_cors.png", units = "px",
+  width = 2500, height = 2000)
+
+ggplot(data = rcond, 
+       aes(x = `Exposure index`,
+           y = `Accumulated thermal units`)) + 
+  geom_smooth(method = "lm", colour = "black",
+              linetype = 2, se = FALSE) +
+  geom_smooth(data = rconds12, method = "lm",
+              fullrange = T, alpha = 1/10,
+              se = FALSE, color = "gray") +
+  geom_point(size = 2, shape = 21,
+             color = "black", fill = "gray90") +
+  mytheme +
+  labs(x = "Exposure index (°C)",
+       y = "Accumulated thermal units (°C)")
