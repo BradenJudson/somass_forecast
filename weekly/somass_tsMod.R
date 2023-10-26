@@ -47,6 +47,7 @@ win <- seq(as.Date("2017-01-01"),         # Isolate study window in variable.
            as.Date("2022-12-31"),         # Almost 5 full years.
            by = "days")                   # of daily info.
 
+
 somass <- spot[spot$date %in% win,]       # Subset to above window.
 
 alldates <- as.data.frame(win) %>%       
@@ -251,7 +252,7 @@ ggsave("plots/temps_TS.png", units = "px",
 
 # Fits between Somass temp and air temp.
 (fit  <- lm(data = dat, wSom ~ rAir)); summary(fit)
-(fit2 <- lm(data = dat, wSom ~ poly(rAir, 2))); summary(fit2)
+(fit2 <- lm(data = dat, wSom ~ poly(rAir, 2, raw = TRUE))); summary(fit2)
 (fit3 <- lm(data = dat, wSom ~ poly(rAir, 3, raw = TRUE))); summary(fit3)
 anova(fit, fit2, fit3)
 
@@ -331,39 +332,67 @@ cowplot::plot_grid(flowTS, sumTS, ncol = 1)
 ggsave("plots/flows.png", units = "px",
        width = 2000, height = 2500)
 
+
+# Split into training and test data --------------------------------------------
+
+# Original temperature time series. 
+STStrain <- STS[1:(length(STS)-nrow(impDF[impDF$date >= "2022-01-01",]))]
+STStest  <- STS[1:(length(STS)-nrow(impDF[impDF$date <  "2022-01-01",]))]
+length(STStrain); length(STStest); length(STS)
+
+# Harmonics.
+harmTrain <- tail(harmonics, nrow(impDF[impDF$date <  "2022-01-01",])); nrow(harmTrain)
+harmTest  <- head(harmonics, nrow(impDF[impDF$date >= "2022-01-01",])); nrow(harmTest)
+
+# Air temperature.
+airTrain <- airvars[airvars$date <  "2022-01-01",]; nrow(airTrain)
+airTest  <- airvars[airvars$date >= "2022-01-01",]; nrow(airTest)
+
+# Flows
+flowTrain <- sproatFlow[sproatFlow$date <  "2022-01-01",]; nrow(flowTrain)
+flowTest  <- sproatFlow[sproatFlow$date >= "2022-01-01",]; nrow(flowTest)
+
+# Test for equal lengths. Looks good.
+all.equal(length(STStrain), nrow(flowTrain), nrow(harmTrain), nrow(airTrain), 266)
+all.equal(length(STStest),  nrow(flowTest),  nrow(harmTest),  nrow(airTest),  52)
+
 # TS Model selection -----------------------------------------------------------
 
 # Define a funcion to test ARIMA with various covariate terms.
 arm.xreg <- function(xreg) {
   # y = Somass temperatures.
-  Arima(y = as.numeric(STS),
+  Arima(y = as.numeric(STStrain),
         # Optimal error structure defined earlier.
         order = order,
         seasonal = FALSE,
         # Covariates = Fourier terms and whatever else is defined.
-        xreg = as.matrix(cbind(harmonics, xreg)))
+        xreg = as.matrix(cbind(harmTrain, xreg)))
 }
 
 
 # Set up a list so the computation is vectorized. 
 # All covariates and select combinations of covariates. 
-xregs <- list(air1 = airvars[,  2], air2 = airvars[,2:3],
-              air3 = airvars[,2:4], sproat = sproatFlow[,2],
-              sproat2 = as.data.frame(poly(sproatFlow$rsproat, 2)),
+xregs <- list(air1 = airTrain[,  2], air2 = airTrain[,2:3],
+              air3 = airTrain[,2:4], sproat = flowTrain[,2],
+              sproat2 = as.data.frame(poly(flowTrain$rsproat, 2)),
               harmonics = NULL, 
-              air1spr1 = cbind(airvars[,2], sproatFlow[,2]),
-              air1spr2 = cbind(airvars[,2], as.data.frame(poly(sproatFlow$rsproat, 2))),
-              air2Spr1 = cbind(airvars[,2:3], sproatFlow[,2]),
-              air2Spr2 = cbind(airvars[,2:3], as.data.frame(poly(sproatFlow$rsproat, 2))),
-              air3Spr2 = cbind(airvars[,2:4], as.data.frame(poly(sproatFlow$rsproat, 2))))
+              air1spr1 = cbind(airTrain[,2], flowTrain[,2]),
+              air1spr2 = cbind(airTrain[,2], 
+                         as.data.frame(poly(flowTrain$rsproat, 2, raw = T))),
+              air2Spr1 = cbind(airTrain[,2:3], flowTrain[,2]),
+              air2Spr2 = cbind(airTrain[,2:3], 
+                         as.data.frame(poly(flowTrain$rsproat, 2, raw = T))),
+              air3Spr2 = cbind(airTrain[,2:4],
+                         as.data.frame(poly(flowTrain$rsproat, 2, raw = T))))
 
 # Apply to all list elements simultaneously. 
 (xreg_mods <- lapply(xregs, arm.xreg))
 
 # Extract list values and reorganize into a data.frame.
 (mod_vals <-  as.data.frame(do.call(rbind,
-              lapply(xreg_mods, accuracy))) %>% 
-           mutate(AIC  = c(do.call(rbind, lapply(xreg_mods, AIC))),
+           lapply(xreg_mods, accuracy))) %>% 
+           mutate(AIC  = c(do.call(rbind, 
+                  lapply(xreg_mods, AIC))),
            xreg = names(xregs),
            deltaAIC = round(AIC - min(AIC), 2)) %>% 
     relocate("xreg", "AIC", "deltaAIC") %>% 
@@ -373,52 +402,45 @@ xregs <- list(air1 = airvars[,  2], air2 = airvars[,2:3],
 
 write.csv(mod_vals, "arima_models.csv", row.names = F)
 
-# Isolate the model with lowest relative AIC.
-(optMod <- xreg_mods[[mod_vals[mod_vals$deltaAIC == 0, 1]]])
+# Isolate the selected model. Lowest AIC within 1% and most parsimonious. 
+(optMod <- xreg_mods[[mod_vals[mod_vals$xreg == "air1", 1]]])
 
-
-arimaDF <- data.frame(obs  = impDF$wSom,
-                      date = impDF$date,
-                      h1   = fitted(optMod, h = 1),
-                      h2   = fitted(optMod, h = 2),
-                      h3   = fitted(optMod, h = 3),
-                      h4   = fitted(optMod, h = 4)) %>% 
+arimaDF <- data.frame(obs   = as.numeric(STStrain),
+                      date  = as.Date(airTrain[,1]),
+                      h1m   = fitted(optMod, h = 1),
+                      h2m   = fitted(optMod, h = 2),
+                      h3m   = fitted(optMod, h = 3),
+                      h4m   = fitted(optMod, h = 4)) %>% 
   mutate(month = month(date),
          year = year(date),
-         MAE2  = abs(obs - h2)) %>% 
-  filter(month %in% c(4:9)) 
+         MAE2  = abs(obs - h2m)) %>% 
+  filter(month %in% c(4:9))
 
-arimaDF <- data.frame(obs  = impDF$wSom,
-                      date = impDF$date,
-                      h1   = fitted(optMod, h = 1),
-                      h2   = fitted(optMod, h = 2),
-                      h3   = fitted(optMod, h = 3),
-                      h4   = fitted(optMod, h = 4)) %>% 
-  mutate(month = month(date),
-         year = year(date),
-         MAE2  = (obs - h2),
-         MAE3  = (obs - h3))  
-
-summary(arimaDF$MAE2); summary(arimaDF$MAE3)
 
 # Convert to LF for plotting purposes.
-armLF <- arimaDF %>% 
-  pivot_longer(cols = starts_with("h"), 
-               names_to = "h") %>% 
+armLF <- arimaDF %>%
+  pivot_longer(cols = starts_with("h"),
+               names_to = "h") %>%
   mutate(MAE = abs(obs - value),
-         fh  = case_when(h == "h1" ~ "FH = 1 week",
-                         h == "h2" ~ "FH = 2 weeks",
-                         h == "h3" ~ "FH = 3 weeks",
-                         h == "h4" ~ "FH = 4 weeks"),
-         year = as.factor(year))
+         fh  = case_when(h == "h1m" ~ "FH = 1 week",
+                         h == "h2m" ~ "FH = 2 weeks",
+                         h == "h3m" ~ "FH = 3 weeks",
+                         h == "h4m" ~ "FH = 4 weeks"),
+         year = as.factor(year),
+         upper = value + 1.96*sqrt(optMod$sigma2),
+         lower = value - 1.96*sqrt(optMod$sigma2))
 
-
-ggplot(data = armLF, 
+# Plot observed and predicted values by year and horizon.
+ggplot(data = armLF,
        aes(x = date, y = obs)) +
   mytheme +
+  geom_ribbon(aes(x = date, ymin = lower,
+                  ymax = upper, fill = year),
+              colour = NA,  alpha = 1/5) +
   geom_line(aes(x = date, y = value, colour = year),
             size = 1, alpha = 2/3, linetype=  1) +
-  geom_point(size = 1.5, alpha = 2/8) +
+  geom_point(size = 1.5, shape = 21,
+             colour = "gray50", fill = "gray90") +
   facet_grid2(c("fh", "year"),
               scales = "free_x", independent = "x") +
   labs(x = NULL, y = "Somass temperature (°C)") +
@@ -427,10 +449,10 @@ ggplot(data = armLF,
   theme(legend.position = "none")
 
 ggsave("plots/arima_acc.png", units = "px",
-       width = 3000, height = 2000)
+       width = 2500, height = 2000)
 
 
-#Performance -------------------------------------------------------------------
+#Performance: Training ---------------------------------------------------------
 
 
 # Define forecasting function for cross-validation.
@@ -451,13 +473,13 @@ fc <- function(y, h, xreg, newxreg) {
 # Perform cross-validation. 
 # Weekly Somass temperatures as time series, Fourier terms as covariates. 
 # Looking ahead h = 1:4 weeks.
-forcv <- tsCV(as.numeric(STS), fc,
-          h = fh, xreg = as.matrix(cbind(harmonics, 
-                                  airvars[,c(2:4)])))
+forcv <- tsCV(as.numeric(STStrain), fc,
+          h = fh, xreg = as.matrix(cbind(harmTrain, 
+                                  airTrain[,c(2)])))
 head(forcv,  15) # Check formatting.
 
 # Meteorological season definitions. 
-seasons <- airvars %>% 
+seasons <- airTrain %>% 
   rownames_to_column(var = "index") %>% 
   mutate(q = lubridate::quarter(date, fiscal_start = 12))
 
@@ -527,6 +549,68 @@ summary(aov(cv_ma ~ season, data = fpl))
 summary(aov(cv_ma ~ Horizon, data = fpl))
 
 
+
+# Performance: Test ------------------------------------------------------------
+
+# Run optimal selected ARIMA model on 2022 data. 
+# Uses model parameters from training data, which are applied to test dataset.
+(arm22 <- Arima(model = optMod, STStest, 
+          xreg = as.matrix(cbind(harmTest, airTest[,2]))))
+
+df22 <- data.frame(                        # Put input data and fitted test values in one dataframe. 
+  date = airTest[,1],                      # Dates for forecasted values.       
+  obs  = as.numeric(STStest),              # Observed values for 2022. 
+  h1   = as.numeric(fitted(arm22, h = 1)), # FH = 1 week.
+  h2   = as.numeric(fitted(arm22, h = 2)), # FH = 2 weeks.
+  h3   = as.numeric(fitted(arm22, h = 3)), # FH = 3 weeks.
+  h4   = as.numeric(fitted(arm22, h = 4))  # FH = 4 weeks.
+) %>% 
+  pivot_longer(cols = c(h1, h2, h3, h4),
+               names_to  = "h",
+               values_to = "Predicted") %>% 
+  # Tidy labels for later plotting.
+  mutate(residuals = obs - Predicted,
+         seas = quarter(date, fiscal_start = 12),
+         upper = Predicted + 1.96*sqrt(arm22$sigma2),
+         lower = Predicted - 1.96*sqrt(arm22$sigma2),
+         fh  = case_when(h == "h1" ~ "FH = 1 week",
+                         h == "h2" ~ "FH = 2 weeks",
+                         h == "h3" ~ "FH = 3 weeks",
+                         h == "h4" ~ "FH = 4 weeks")) 
+
+# Plot.
+ggplot(data = df22, 
+       aes(x = date)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper),
+              colour = NA, alpha = 2/5,
+              fill = "skyblue") +
+  geom_line(aes(y = Predicted), colour = "skyblue2",
+            size = 1, alpha = 1, linetype  = 1) +
+  geom_point(aes(y = obs), shape = 21, size = 1.5,
+             colour = "gray50", fill = "gray90") +
+  facet_wrap(~fh) +
+  mytheme +
+  scale_x_date(date_labels = "%b") +
+  labs(x = NULL, y = "Somass River temperature (°C)")
+
+ggsave("plots/accuracy2022_predobs.png", units = "px",
+       width = 2500, height = 2000)
+  
+# Seasonal measurements of accuracy.
+(acc22 <- df22 %>% 
+    group_by(seas, fh) %>% 
+    summarise(
+      RMSE = round(sqrt(mean(residuals^2, na.rm = TRUE)), 3),
+      MAE  = round(mean(abs(residuals), na.rm = TRUE), 3),
+      MAPE = round(100*mean(abs(residuals)/obs, na.rm = TRUE), 3)))
+write.csv(acc22, "accuracy2022.csv", row.names = FALSE)
+
+# Year-round measurements of accuracy.
+accuracy(STStest, as.numeric(fitted(arm22, h = 1)))
+accuracy(STStest, as.numeric(fitted(arm22, h = 2)))
+accuracy(STStest, as.numeric(fitted(arm22, h = 3)))
+accuracy(STStest, as.numeric(fitted(arm22, h = 4)))
+
 # Nonlinear model --------------------------------------------------------------
 
 # Combine all relevant variables into one object.
@@ -575,7 +659,8 @@ hist(mod2$residuals); shapiro.test(mod2$residuals)
 
 # Assess accuracy of nonlinear model.
 nlmacc <- data.frame(res = mod2$model$wSom - mod2$fitted.values,
-                     date = jtest$date) %>% mutate(q = quarter(date, fiscal_start = 12),
+                     date = jtest$date) %>% 
+                     mutate(q = quarter(date, fiscal_start = 12),
                      # Separate accuracy measurements by meteorological season.
                      season = case_when(q == 1 ~ "Winter", q == 2 ~ "Spring",
                                         q == 3 ~ "Summer", q == 4 ~ "Fall")) %>% 
@@ -585,8 +670,8 @@ nlmacc <- data.frame(res = mod2$model$wSom - mod2$fitted.values,
             MAPE = 100*mean(abs(res)/mod2$model$wSom, na.rm = TRUE))
 head(nlmacc); dim(nlmacc)
 
-
 # Plot the derivation of parameters a, b and y.
+# Have to input them manually for some reason otherwise it throws an error?
 ggplot(data = jtest, aes(x = mAirT, y = wSom)) +
   geom_point(size = 2, alpha = 1/5) + mytheme  +
   labs(x = "Air temperature (°C)",
@@ -622,7 +707,11 @@ ggsave("plots/mohseni_logistic.png", units = "px",
 # Isolate outputs from optimal model. 
 modout <- data.frame(obs = mod2$model$wSom,
                      fit = mod2$fitted.values,
-                     dat = as.Date(jtest$date)) %>% 
+                     dat = as.Date(jtest$date),
+                     lwrPI = predict(mod2, interval = "prediction")[,2],
+                     uprPI = predict(mod2, interval = "prediction")[,3],
+                     lwrCI = predict(mod2, interval = "confidence")[,2],
+                     uprCI = predict(mod2, interval = "confidence")[,3]) %>% 
   mutate(year = as.factor(year(dat)),
          # Calculate residuals. 
          res = -1*(obs - fit))
@@ -632,22 +721,43 @@ round(mean(modout$res), 20); round(sd(modout$res), 3)
 
 # Plot residuals and predicted/observed values. 
 ggplot(data = modout) +
-  geom_segment(aes(x = dat, xend = dat,
-                   y = obs, yend = fit),
-               linetype = 1, colour = "red", 
-               size = 2/3, alpha = 1/2) +
-  geom_line(aes(x = dat, y = obs,
+  geom_ribbon(aes(x = dat, ymin = lwrPI, 
+                  ymax = uprPI, fill = year),
+                  alpha = 1/5, colour = NA) +
+  geom_line(aes(x = dat, y = fit,
                 color = year),
             size = 1, alpha = 2/3) +
-  geom_point(aes(x = dat, y = fit),
+  geom_point(aes(x = dat, y = obs),
              size = 1.5, shape = 21, 
              fill = "gray90", colour = "black") +
   facet_wrap(~year, scales = "free") +
-  labs( y = "Somass temperature (°C)", x = NULL) +
+  labs(y = "Somass temperature (°C)", x = NULL) +
   scale_x_date(date_labels = "%b") + mytheme +
   theme(legend.position = "none")
 
 ggsave("plots/nlm_ts_obs_fitted.png", width = 10, height = 6)
+
+# Nonlinear model diagnostics plots.
+# Fitted vs. observed values first.
+(qq <- ggplot(data = modout, 
+             aes(x = obs, y = fit)) +
+  geom_smooth(method = "lm", color = "black") +
+  geom_point(size = 2, shape = 21,
+             colour = "black", fill = "gray90") + 
+    mytheme + labs(x = "Observed temperatures (°C)",
+                   y = "Fitted temperatures (°C)"))
+
+# Histogram of residuals second. 
+(rhis <- ggplot(data = modout) +
+    geom_histogram(aes(res), colour = "black",
+                   fill = "gray92") + mytheme +
+    labs(x = "Residual (°C)", y = NULL))
+
+# Combine and save.
+cowplot::plot_grid(qq, rhis, align = "vh", ncol = 1)
+ggsave("plots/nlm_diagnostics.png", width = 2000, 
+       height = 2500, units = "px")
+
 
 
 # 2022, nlm test ---------------------------------------------------------------
@@ -668,8 +778,10 @@ j22 <- som22[,c("wSom", "rAir", "year", "value", "date")] %>%
   # Eq. 1 of Mohseni et al., 1999: Water Resources Research Vol. 34.
   mutate(Tw = coef(fit22)[1]/(1 + exp((coef(fit22)[2] - rAir)/coef(fit22)[3])))
 
-# Predicted values.
+# Predicted values - mean and prediction interval. 
 som22$pred <- as.numeric(predict(mod2, newdata = j22))
+som22$lwr  <- as.numeric(predict(mod2, newdata = j22, interval = "prediction")[,2])
+som22$upr  <- as.numeric(predict(mod2, newdata = j22, interval = "prediction")[,3])
 # Residuals.
 som22$res  <- som22$pred - som22$wSom
 # Factor for year. 
@@ -687,14 +799,12 @@ mean(abs(som22$res), na.rm = TRUE)
 
 # Plot of 2022 observed vs. predicted.
 ggplot(data = som22) +
-  geom_segment(aes(x = date, xend = date,
-                   y = wSom, yend = pred),
-               linetype = 1, colour = "red",
-               size = 2/3, alpha = 1/2) +
-  geom_line(aes(x = date, y = wSom),
+  geom_ribbon(aes(x = date, ymin = lwr, ymax=upr),
+              fill = "skyblue2", colour = NA, alpha = 1/5) +
+  geom_line(aes(x = date, y = pred),
             size = 1, color = "skyblue2") +
-  geom_point(aes(x = date, y = pred),
-             size = 1.5, shape = 21, 
+  geom_point(aes(x = date, y = wSom),
+             size = 2, shape = 21, 
              fill = "gray90", colour = "black") +
   mytheme + labs(x = NULL, y = "Somass temperature (°C)") +
   scale_x_date(date_labels = "%B") 
@@ -702,10 +812,27 @@ ggplot(data = som22) +
 ggsave("plots/nlm_fitobs2022.png", units = "px",
        width = 2000, height = 1250)
   
+# Accuracy metrics for test run on 2022 data.
+(nlm22acc <- som22 %>% 
+    mutate(q = quarter(date, fiscal_start = 12),
+           # Separate accuracy measurements by meteorological season.
+           season = case_when(q == 1 ~ "Winter", q == 2 ~ "Spring",
+                              q == 3 ~ "Summer", q == 4 ~ "Fall")) %>% 
+    group_by(season) %>% 
+    summarise(ABSE = mean(abs(res), na.rm = TRUE),
+              RMSE = sqrt(mean(res^2, na.rm = TRUE)),
+              MAPE = 100*mean(abs(res)/wSom, na.rm = TRUE)))
 
 
 
-
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
 
 ################################################################################
 ################################################################################
@@ -829,5 +956,11 @@ ggsave("plots/forecast_wProbs.png", units = "px",
        width = 2200, height = 1200)
 
 
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
 ################################################################################
 ################################################################################
