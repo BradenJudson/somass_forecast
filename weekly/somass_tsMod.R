@@ -256,7 +256,7 @@ ggsave("plots/temps_TS.png", units = "px",
 (fit3 <- lm(data = dat, wSom ~ poly(rAir, 3, raw = TRUE))); summary(fit3)
 anova(fit, fit2, fit3)
 
-# Isolate as dataframe for later.
+# Isolate as dataframe for later. 
 airvars <- data.frame(date = dat$date,
            poly(dat$rAir, 3, raw = TRUE)) 
 
